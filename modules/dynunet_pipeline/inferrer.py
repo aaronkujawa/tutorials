@@ -17,12 +17,11 @@ import torch
 import torch.nn as nn
 from ignite.engine import Engine
 from monai.data import decollate_batch
-from monai.data.nifti_writer import write_nifti
 from monai.engines import SupervisedEvaluator
 from monai.engines.utils import IterationEvents
 from monai.inferers import Inferer
 from monai.networks.utils import eval_mode
-from monai.transforms import AsDiscrete
+from monai.transforms import AsDiscrete, SaveImage
 from torch.utils.data import DataLoader
 
 from transforms import recovery_prediction
@@ -154,12 +153,14 @@ class DynUNetInferrer(SupervisedEvaluator):
         filename = batchdata["image_meta_dict"]["filename_or_obj"][0].split("/")[-1]
 
         print("save {} with shape: {}, mean values: {}".format(filename, predictions_org.shape, predictions_org.mean()))
-        write_nifti(
-            data=predictions_org,
-            file_name=os.path.join(self.output_dir, filename),
-            affine=affine,
-            resample=False,
+        self.saveImage = SaveImage(
+            output_dir=self.output_dir,
+            output_postfix="",
+            output_ext=filename,
             output_dtype=np.uint8,
+            separate_folder=False,
+            resample=False,
         )
+        self.saveImage(predictions_org)
         engine.fire_event(IterationEvents.FORWARD_COMPLETED)
         return {"pred": predictions_org}
