@@ -43,29 +43,27 @@ class DynUNetTrainer(SupervisedTrainer):
             ValueError: When ``batchdata`` is None.
 
         """
-        if batchdata is None:
-            raise ValueError("Must provide batch data for current iteration.")
-        batch = self.prepare_batch(batchdata, engine.state.device, engine.non_blocking)
-        if len(batch) == 2:
-            inputs, targets = batch
-            args: Tuple = ()
-            kwargs: Dict = {}
-        else:
-            inputs, targets, args, kwargs = batch
-        # put iteration outputs into engine.state
+        # put all MetaTensors on device
+        inputs = batchdata['image'].to(device=engine.state.device, non_blocking=engine.non_blocking)
+        targets = [l.to(device=engine.state.device, non_blocking=engine.non_blocking) for l in batchdata['label']]
+
+        # put iteration inputs into engine.state
         engine.state.output = {Keys.IMAGE: inputs, Keys.LABEL: targets}
 
         def _compute_pred_loss():
-            preds = self.inferer(inputs, self.network, *args, **kwargs)
-            if len(preds.size()) - len(targets.size()) == 1:
-                # deep supervision mode, need to unbind feature maps first.
-                preds = torch.unbind(preds, dim=1)
+            # run forward pass
+            preds = self.inferer(inputs, self.network)
+
+            # save prediction in engine.state
             engine.state.output[Keys.PRED] = preds
-            del preds
             engine.fire_event(IterationEvents.FORWARD_COMPLETED)
+
+            # calculate loss
             engine.state.output[Keys.LOSS] = sum(
-                0.5**i * self.loss_function.forward(p, targets) for i, p in enumerate(engine.state.output[Keys.PRED])
+                0.5 ** i * self.loss_function.forward(p, t)
+                for i, (p, t) in enumerate(zip(engine.state.output[Keys.PRED], targets))
             )
+            # put iteration loss into engine.state
             engine.fire_event(IterationEvents.LOSS_COMPLETED)
 
         self.network.train()
