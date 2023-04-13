@@ -64,6 +64,7 @@ def get_network(properties, task_id, pretrain_path, checkpoint=None):
         norm_name="instance",
         deep_supervision=True,
         deep_supr_num=deep_supr_num[task_id],
+        return_list=True,
     )
 
     if checkpoint is not None:
