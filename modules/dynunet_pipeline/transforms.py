@@ -27,6 +27,7 @@ from monai.transforms import (
     SpatialPadd,
     ToTensord,
     EnsureTyped,
+    AppendDownsampledd,
 )
 from monai.transforms.compose import MapTransform
 from monai.transforms.utils import generate_spatial_bounding_box
@@ -90,8 +91,9 @@ def get_task_transforms(mode, task_id, pos_sample_num, neg_sample_num, num_sampl
             RandFlipd(["image", "label"], spatial_axis=[0], prob=0.5),
             RandFlipd(["image", "label"], spatial_axis=[1], prob=0.5),
             RandFlipd(["image", "label"], spatial_axis=[2], prob=0.5),
-            CastToTyped(keys=["image", "label"], dtype=(np.float32, np.uint8)),
-            EnsureTyped(keys=["image", "label"]),
+            AppendDownsampledd(["label"], downsampled_shapes=[patch_size[task_id]]),
+            CastToTyped(keys=["image"], dtype=np.float32),
+            EnsureTyped(keys=["image"]),
         ]
     elif mode == "validation":
         other_transforms = [
