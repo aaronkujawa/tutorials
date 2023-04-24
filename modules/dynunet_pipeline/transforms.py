@@ -35,8 +35,11 @@ def get_task_transforms(mode, task_id,
                         modality_keys,
                         pos_sample_num,
                         neg_sample_num,
-                        sample_num,
                         use_nonzero=False,
+                        registration_template_path=None,
+                        preproc_out_dir=None,
+                        do_brain_extraction=False,
+                        use_mni_prior=False,
                         ):
 
     label_keys = ["label"]
@@ -202,3 +205,33 @@ def get_task_transforms(mode, task_id,
         ], unpack_items=True)
 
         return transform
+
+
+def determine_normalization_param_from_crop(prep_data_loader, key):
+    '''
+    Helper function to determine the "use_nonzero" parameter of the NormalizeIntensity transform. It loads the whole
+    dataset via the provided dataloader, whose preprocessing transform includes the CropForeground transform. If the
+    median volume reduction achieved by the cropping is more than 25%, use_nonzero will be returned as True, otherwise
+    false.
+    :param prep_data_loader: The dataloader, must be configured to go through the complete dataset once
+    :param key: The key of the dictionaries that leads to the cropped MetaTensor
+    :return: bool, that indicates if zeros should be included in normalization or not.
+    '''
+
+    all_crop_size_factors = []
+
+    def get_crop_size_factor(img):
+        # among applied transforms, find the idx of the crop transform
+        for idx, tfm in enumerate(img.applied_operations):
+            if tfm['class'] == 'CropForeground':
+                break
+        crop_size_factor = np.prod(img.shape) / np.prod(img.applied_operations[idx]['orig_size'])
+        return crop_size_factor
+
+    for batch in prep_data_loader:
+        for sample in batch:
+            all_crop_size_factors.append(get_crop_size_factor(sample[key]))
+
+    print(f"{all_crop_size_factors=}")
+
+    return True if np.median(all_crop_size_factors) < 0.75 else False

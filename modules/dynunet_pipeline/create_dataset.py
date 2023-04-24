@@ -33,7 +33,7 @@ def get_data(args, batch_size=1, mode="train"):
 
     use_mni_prior = True if (hasattr(args, "mni_prior_path") and args.mni_prior_path) else False
 
-    transform_params = (args.pos_sample_num, args.neg_sample_num, args.num_samples)
+    transform_params = (args.pos_sample_num, args.neg_sample_num)
     multi_gpu_flag = args.multi_gpu
 
     if mode == "test":
