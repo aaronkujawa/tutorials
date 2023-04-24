@@ -24,8 +24,6 @@ from monai.networks.utils import eval_mode
 from monai.transforms import AsDiscrete, Transform
 from torch.utils.data import DataLoader
 
-from transforms import recovery_prediction
-
 
 class DynUNetEvaluator(SupervisedEvaluator):
     """
@@ -127,18 +125,18 @@ class DynUNetEvaluator(SupervisedEvaluator):
         else:
             inputs, targets, args, kwargs = batch
 
-        targets = targets.cpu()
+        targets = targets
 
         def _compute_pred():
             ct = 1.0
-            pred = self.inferer(inputs, self.network, *args, **kwargs).cpu()
+            pred = self.inferer(inputs, self.network, *args, **kwargs)
             pred = nn.functional.softmax(pred, dim=1)
             if not self.tta_val:
                 return pred
             else:
                 for dims in [[2], [3], [4], (2, 3), (2, 4), (3, 4), (2, 3, 4)]:
                     flip_inputs = torch.flip(inputs, dims=dims)
-                    flip_pred = torch.flip(self.inferer(flip_inputs, self.network).cpu(), dims=dims)
+                    flip_pred = torch.flip(self.inferer(flip_inputs, self.network), dims=dims)
                     flip_pred = nn.functional.softmax(flip_pred, dim=1)
                     del flip_inputs
                     pred += flip_pred
@@ -154,30 +152,12 @@ class DynUNetEvaluator(SupervisedEvaluator):
             else:
                 predictions = _compute_pred()
 
-        inputs = inputs.cpu()
+        inputs = inputs
 
         predictions = self.post_pred(decollate_batch(predictions)[0])
         targets = self.post_label(decollate_batch(targets)[0])
 
-        resample_flag = batchdata["resample_flag"]
-        anisotrophy_flag = batchdata["anisotrophy_flag"]
-        crop_shape = batchdata["crop_shape"][0].tolist()
-        original_shape = batchdata["original_shape"][0].tolist()
-        if resample_flag:
-            # convert the prediction back to the original (after cropped) shape
-            predictions = recovery_prediction(predictions.numpy(), [self.num_classes, *crop_shape], anisotrophy_flag)
-            predictions = torch.tensor(predictions)
-
-        # put iteration outputs into engine.state
-        engine.state.output = {Keys.IMAGE: inputs, Keys.LABEL: targets.unsqueeze(0)}
-        engine.state.output[Keys.PRED] = torch.zeros([1, self.num_classes, *original_shape])
-        # pad the prediction back to the original shape
-        box_start, box_end = batchdata["bbox"][0]
-        h_start, w_start, d_start = box_start
-        h_end, w_end, d_end = box_end
-
-        engine.state.output[Keys.PRED][0, :, h_start:h_end, w_start:w_end, d_start:d_end] = predictions
-        del predictions
+        engine.state.output = {Keys.IMAGE: inputs, Keys.LABEL: targets.unsqueeze(0), Keys.PRED: predictions.unsqueeze(0)}
 
         engine.fire_event(IterationEvents.FORWARD_COMPLETED)
         engine.fire_event(IterationEvents.MODEL_COMPLETED)
