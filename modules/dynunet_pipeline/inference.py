@@ -8,6 +8,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 import logging
 import os
 import sys
@@ -38,9 +39,13 @@ def inference(args):
     # load hyper parameters
     task_id = args.task_id
     checkpoint = args.checkpoint
-    val_output_dir = "./runs_{}_fold{}_{}/".format(args.task_id, args.fold, args.expr_name)
+    model_folder_path = os.path.join(args.model_folds_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
+        args.task_id, args.fold, args.expr_name))
+    val_output_dir = os.path.join(args.val_output_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
+        args.task_id, args.fold, args.expr_name))
     sw_batch_size = args.sw_batch_size
     infer_output_dir = os.path.join(val_output_dir, task_name[task_id])
+    args.infer_output_dir = infer_output_dir
     window_mode = args.window_mode
     eval_overlap = args.eval_overlap
     amp = args.amp
@@ -49,7 +54,7 @@ def inference(args):
     local_rank = args.local_rank
 
     if not os.path.exists(infer_output_dir):
-        os.makedirs(infer_output_dir)
+        os.makedirs(infer_output_dir, exist_ok=True)
 
     if multi_gpu_flag:
         dist.init_process_group(backend="nccl", init_method="env://")
@@ -60,7 +65,7 @@ def inference(args):
 
     properties, test_loader = get_data(args, mode="test")
 
-    net = get_network(properties, task_id, val_output_dir, checkpoint)
+    net = get_network(properties, task_id, model_folder_path, checkpoint)
     net = net.to(device)
 
     if multi_gpu_flag:
@@ -79,6 +84,8 @@ def inference(args):
             sw_batch_size=sw_batch_size,
             overlap=eval_overlap,
             mode=window_mode,
+            device="cpu",
+            progress=True,
         ),
         amp=amp,
         tta_val=tta_val,
@@ -99,6 +106,20 @@ if __name__ == "__main__":
         help="dataset path",
     )
     parser.add_argument(
+        "-model_folds_dir",
+        "--model_folds_dir",
+        type=str,
+        default="",
+        help="Path to folder that contains subfolders task01, task02... with trained models",
+    )
+    parser.add_argument(
+        "-val_output_dir",
+        "--val_output_dir",
+        type=str,
+        default="",
+        help="Path to folder that contains subfolders task01, task02... where to store inference results",
+    )
+    parser.add_argument(
         "-expr_name",
         "--expr_name",
         type=str,
@@ -110,6 +131,13 @@ if __name__ == "__main__":
         "--datalist_path",
         type=str,
         default="config/",
+    )
+    parser.add_argument(
+        "-test_files_dir",
+        "--test_files_dir",
+        type=str,
+        default="",
+        help="where to look for the *.nii.gz files to use for inference."
     )
     parser.add_argument(
         "-train_num_workers",
