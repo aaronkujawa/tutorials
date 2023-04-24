@@ -16,15 +16,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 from ignite.engine import Engine
-from monai.data import decollate_batch
+from monai.transforms import SaveImaged, BatchInverseTransform, allow_missing_keys_mode
 from monai.engines import SupervisedEvaluator
 from monai.engines.utils import IterationEvents
 from monai.inferers import Inferer
 from monai.networks.utils import eval_mode
-from monai.transforms import AsDiscrete, SaveImage
+from monai.transforms import AsDiscrete
 from torch.utils.data import DataLoader
 
-from transforms import recovery_prediction
+
 
 
 class DynUNetInferrer(SupervisedEvaluator):
@@ -104,9 +104,8 @@ class DynUNetInferrer(SupervisedEvaluator):
             ct = 1.0
             pred = self.inferer(inputs, self.network, *args, **kwargs).cpu()
             pred = nn.functional.softmax(pred, dim=1)
-            if not self.tta_val:
-                return pred
-            else:
+
+            if self.tta_val:
                 for dims in [[2], [3], [4], (2, 3), (2, 4), (3, 4), (2, 3, 4)]:
                     flip_inputs = torch.flip(inputs, dims=dims)
                     flip_pred = torch.flip(self.inferer(flip_inputs, self.network).cpu(), dims=dims)
@@ -115,9 +114,13 @@ class DynUNetInferrer(SupervisedEvaluator):
                     pred += flip_pred
                     del flip_pred
                     ct += 1
-                return pred / ct
+                pred = pred / ct
+
+            pred = torch.argmax(pred, dim=1, keepdim=True)
+            return pred
 
         # execute forward computation
+        print("run sliding window inference...")
         with eval_mode(self.network):
             if self.amp:
                 with torch.cuda.amp.autocast():
@@ -125,42 +128,54 @@ class DynUNetInferrer(SupervisedEvaluator):
             else:
                 predictions = _compute_pred()
 
-        inputs = inputs.cpu()
-        predictions = self.post_pred(decollate_batch(predictions)[0])
+        # here we overwrite the "image_0000" with the predictions, because the inverse transformation will only work on the
+        # keys that were used in the forward transform, which was only the "image_0000" key
+        batchdata["image_0000"] = predictions
+        mni_registered = True if 'image_0000_meta_dict_affine_trfm_file_path' in batchdata else False
 
-        affine = batchdata["image_meta_dict"]["affine"].numpy()[0]
-        resample_flag = batchdata["resample_flag"]
-        anisotrophy_flag = batchdata["anisotrophy_flag"]
-        crop_shape = batchdata["crop_shape"][0].tolist()
-        original_shape = batchdata["original_shape"][0].tolist()
+        batch_inverter = BatchInverseTransform(self.data_loader.dataset.transform, self.data_loader)
+        with allow_missing_keys_mode(self.data_loader.dataset.transform):
+            data_list = batch_inverter(batchdata)  # the batch inverter decollates the batch into a list of dicts
 
-        if resample_flag:
-            # convert the prediction back to the original (after cropped) shape
-            predictions = recovery_prediction(predictions.numpy(), [self.num_classes, *crop_shape], anisotrophy_flag)
-        else:
-            predictions = predictions.numpy()
+        # save each prediction in the list of dicts
+        for data_dict in data_list:
+            if not mni_registered:
+                output_original_space_segm_path = os.path.join(self.output_dir, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1]).replace("_stripped", "")
+                SaveImaged(
+                    keys=["image_0000"],
+                    output_dir=os.path.dirname(output_original_space_segm_path),
+                    output_postfix="",
+                    output_ext='nii.gz',
+                    output_dtype=np.uint8,
+                    separate_folder=False,
+                    resample=False,
+                )(data_dict)
 
-        predictions = np.argmax(predictions, axis=0)
+            else:
+                mni_template_space_output_folder_path = os.path.join(self.output_dir, "preprocessed", "registered")
 
-        # pad the prediction back to the original shape
-        predictions_org = np.zeros([*original_shape])
-        box_start, box_end = batchdata["bbox"][0]
-        h_start, w_start, d_start = box_start
-        h_end, w_end, d_end = box_end
-        predictions_org[h_start:h_end, w_start:w_end, d_start:d_end] = predictions
-        del predictions
+                SaveImaged(
+                    keys=["image_0000"],
+                    output_dir=mni_template_space_output_folder_path,
+                    output_postfix="pred",
+                    output_ext='nii.gz',
+                    output_dtype=np.uint8,
+                    separate_folder=False,
+                    resample=False,
+                )(data_dict)
 
-        filename = batchdata["image_meta_dict"]["filename_or_obj"][0].split("/")[-1]
+                # transform saved segmentation into the space of the original image
+                print("transform from MNI template space to original image space")
+                # Define transform that uses ANTs to invert the affine registration to the template space
+                #ants_apply_transform = ANTsApplyTransformd(keys="image_0000") TODO: uncomment when ANTs integrated
 
-        print("save {} with shape: {}, mean values: {}".format(filename, predictions_org.shape, predictions_org.mean()))
-        self.saveImage = SaveImage(
-            output_dir=self.output_dir,
-            output_postfix="",
-            output_ext=filename,
-            output_dtype=np.uint8,
-            separate_folder=False,
-            resample=False,
-        )
-        self.saveImage(predictions_org)
+                mni_space_segm_path = os.path.join(mni_template_space_output_folder_path, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1].replace(".nii.gz", "_pred.nii.gz"))
+                output_original_space_segm_path = os.path.join(self.output_dir, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1]).replace("_ANTsregistered", "").replace("_stripped", "")
+                ants_apply_transform(data_dict,
+                                     input_file_path=mni_space_segm_path,
+                                     output_file_path=output_original_space_segm_path,
+                                     use_inverse_trfm=True)
+
+
         engine.fire_event(IterationEvents.FORWARD_COMPLETED)
-        return {"pred": predictions_org}
+        return {"pred": predictions}
