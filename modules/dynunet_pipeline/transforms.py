@@ -35,7 +35,7 @@ def get_task_transforms(mode, task_id,
                         modality_keys,
                         pos_sample_num,
                         neg_sample_num,
-                        use_nonzero=False,
+                        use_nonzero,
                         registration_template_path=None,
                         preproc_out_dir=None,
                         do_brain_extraction=False,
@@ -45,8 +45,8 @@ def get_task_transforms(mode, task_id,
     label_keys = ["label"]
     all_keys = modality_keys + label_keys
 
-    # input modalities to which intensity based transforms should be applied
-    mod_inty_keys = modality_keys
+    # exclude the prior from the intensity transforms
+    mod_inty_keys = modality_keys[:-1] if use_mni_prior else modality_keys
 
     load_image = LoadImaged(keys=all_keys, image_only=True)
     ensure_channel_first = EnsureChannelFirstd(keys=all_keys)

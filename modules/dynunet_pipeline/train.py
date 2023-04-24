@@ -30,6 +30,7 @@ from torch.nn.parallel import DistributedDataParallel
 from create_dataset import get_data
 from create_network import get_network
 from evaluator import DynUNetEvaluator
+from transforms import determine_normalization_param_from_crop
 from task_params import data_loader_params, patch_size
 from trainer import DynUNetTrainer
 
@@ -54,6 +55,8 @@ def validation(args):
     multi_gpu_flag = args.multi_gpu
     local_rank = args.local_rank
     amp = args.amp
+    mni_prior_path = args.mni_prior_path
+
 
     # produce the network
     checkpoint = args.checkpoint
@@ -67,6 +70,7 @@ def validation(args):
         device = torch.device("cuda")
 
     properties, val_loader = get_data(args, mode="validation")
+    properties['mni_prior_path'] = mni_prior_path
     net = get_network(properties, task_id, val_output_dir, checkpoint)
     net = net.to(device)
 
@@ -132,6 +136,10 @@ def train(args):
     local_rank = args.local_rank
     determinism_flag = args.determinism_flag
     determinism_seed = args.determinism_seed
+    mni_prior_path = args.mni_prior_path
+
+    args.use_nonzero = None  # this is a parameter of the intensity normalization transform. It is determined during preprocessing
+
     if determinism_flag:
         set_determinism(seed=determinism_seed)
         if local_rank == 0:
@@ -147,12 +155,16 @@ def train(args):
     else:
         device = torch.device("cuda")
 
-    properties, val_loader = get_data(args, mode="validation")
+    properties, prep_loader = get_data(args, mode="prep")
+    args.use_nonzero = determine_normalization_param_from_crop(prep_loader, key='image_0000')
+
+    _, val_loader = get_data(args, mode="validation")
     _, train_loader = get_data(args, batch_size=train_batch_size, mode="train")
 
     # produce the network
     checkpoint = args.checkpoint
-    net = get_network(properties, task_id, val_output_dir, checkpoint)
+    properties['mni_prior_path'] = mni_prior_path
+    net = get_network(properties, task_id, val_output_dir, checkpoint=None)  # checkpoint is loaded later if provided
     net = net.to(device)
 
     if multi_gpu_flag:
@@ -241,6 +253,13 @@ def train(args):
     with open(os.path.join(val_output_dir, "training_params.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
 
+    # store the prior in model folder
+    if mni_prior_path:
+        if os.path.isfile(mni_prior_path):
+            shutil.copy(mni_prior_path, val_output_dir)
+        else:
+            raise Exception(f"--mni_prior_path provided but file not found: {properties['mni_prior_path']}")
+
     if checkpoint:
         checkpoint_path = os.path.join(val_output_dir, checkpoint)
         if os.path.exists(checkpoint_path):
@@ -269,6 +288,7 @@ def train(args):
 
     else:
         print("No checkpoints provided. Start training from beginning...")
+
     trainer.run()
     if multi_gpu_flag:
         dist.destroy_process_group()
@@ -342,17 +362,10 @@ if __name__ == "__main__":
         help="the mode parameter for SlidingWindowInferer.",
     )
     parser.add_argument(
-        "-num_samples",
-        "--num_samples",
-        type=int,
-        default=3,
-        help="the num_samples parameter of RandCropByPosNegLabeld.",
-    )
-    parser.add_argument(
         "-pos_sample_num",
         "--pos_sample_num",
         type=int,
-        default=1,
+        default=2,
         help="the pos parameter of RandCropByPosNegLabeld.",
     )
     parser.add_argument(
@@ -389,35 +402,27 @@ if __name__ == "__main__":
     parser.add_argument('-resume_latest_checkpoint', '--resume_latest_checkpoint', dest='resume_latest_checkpoint', action='store_true',
                         help="whether to resume training from the latest modified checkpoint.")
     parser.set_defaults(resume_latest_checkpoint=False)
-    parser.add_argument(
-        "-amp",
-        "--amp",
-        type=bool,
-        default=False,
-        help="whether to use automatic mixed precision.",
-    )
-    parser.add_argument(
-        "-lr_decay",
-        "--lr_decay",
-        type=bool,
-        default=False,
-        help="whether to use learning rate decay.",
-    )
-    parser.add_argument(
-        "-tta_val",
-        "--tta_val",
-        type=bool,
-        default=False,
-        help="whether to use test time augmentation.",
-    )
-    parser.add_argument(
-        "-batch_dice",
-        "--batch_dice",
-        type=bool,
-        default=False,
-        help="the batch parameter of DiceCELoss.",
-    )
-    parser.add_argument("-determinism_flag", "--determinism_flag", type=bool, default=False)
+
+    parser.add_argument('-amp', '--amp', dest='amp', action='store_true', help="whether to use automatic mixed precision.")
+    parser.add_argument('-no-amp', '--no-amp', dest='amp', action='store_false')
+    parser.set_defaults(amp=True)
+
+    parser.add_argument('-lr_decay', '--lr_decay', dest='lr_decay', action='store_true', help="whether to use learning rate decay.")
+    parser.add_argument('-no-lr_decay', '--no-lr_decay', dest='lr_decay', action='store_false')
+    parser.set_defaults(lr_decay=True)
+
+    parser.add_argument('-tta_val', '--tta_val', dest='tta_val', action='store_true', help="whether to use test time augmentation.")
+    parser.add_argument('-no-tta_val', '--no-tta_val', dest='tta_val', action='store_false')
+    parser.set_defaults(tta_val=True)
+
+    parser.add_argument('-batch_dice', '--batch_dice', dest='batch_dice', action='store_true', help="the batch parameter of Loss.")
+    parser.add_argument('-no-batch_dice', '--no-batch_dice', dest='batch_dice', action='store_false')
+    parser.set_defaults(batch_dice=False)
+
+    parser.add_argument('-determinism_flag', '--determinism_flag', dest='determinism_flag', action='store_true')
+    parser.add_argument('-no-determinism_flag', '--no-determinism_flag', dest='determinism_flag', action='store_false')
+    parser.set_defaults(determinism_flag=False)
+
     parser.add_argument(
         "-determinism_seed",
         "--determinism_seed",
@@ -425,17 +430,25 @@ if __name__ == "__main__":
         default=0,
         help="the seed used in deterministic training",
     )
+
+    parser.add_argument('-multi_gpu', '--multi_gpu', dest='multi_gpu', action='store_true', help="whether to use multiple GPUs for training.")
+    parser.add_argument('-no-multi_gpu', '--no-multi_gpu', dest='multi_gpu', action='store_false')
+    parser.set_defaults(multi_gpu=False)
+
+    parser.add_argument('-do_brain_extraction', '--do_brain_extraction', dest='do_brain_extraction', action='store_true', help="whether to perform perform brain extraction during preprocessing.")
+    parser.add_argument('-no-do_brain_extraction', '--no-do_brain_extraction', dest='do_brain_extraction', action='store_false')
+    parser.set_defaults(do_brain_extraction=False)
+
     parser.add_argument(
-        "-multi_gpu",
-        "--multi_gpu",
-        type=bool,
-        default=False,
-        help="whether to use multiple GPUs for training.",
+        "-mni_prior_path",
+        "--mni_prior_path",
+        type=str,
+        default="",
+        help="prior in MNI space, passed as additional input channel to network, has to have same shape as input images",
     )
 
-    setup_root_logger()
-
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
+    setup_root_logger()
     args = parser.parse_args()
     if args.local_rank == 0:
         print_config()

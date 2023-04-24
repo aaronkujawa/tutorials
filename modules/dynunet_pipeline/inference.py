@@ -46,6 +46,7 @@ def inference(args):
     sw_batch_size = args.sw_batch_size
     infer_output_dir = os.path.join(val_output_dir, task_name[task_id])
     args.infer_output_dir = infer_output_dir
+    args.preproc_out_dir = os.path.join(infer_output_dir, "preprocessed")
     window_mode = args.window_mode
     eval_overlap = args.eval_overlap
     amp = args.amp
@@ -63,7 +64,16 @@ def inference(args):
     else:
         device = torch.device("cuda")
 
+    # read the file that stored the arguments of the model training (we need info on a parameter of the normalization
+    # transform and whether a prior was used)
+    with open(os.path.join(model_folder_path, "training_params.json"), "r") as f:
+        train_args_dict = json.load(f)
+
+    args.use_nonzero = train_args_dict["use_nonzero"]
+    args.mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if ("mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
     properties, test_loader = get_data(args, mode="test")
+
+    properties['mni_prior_path'] = args.mni_prior_path
 
     net = get_network(properties, task_id, model_folder_path, checkpoint)
     net = net.to(device)
@@ -131,6 +141,7 @@ if __name__ == "__main__":
         "--datalist_path",
         type=str,
         default="config/",
+        help="where to find the task*/dataset.json"
     )
     parser.add_argument(
         "-test_files_dir",
@@ -150,15 +161,8 @@ if __name__ == "__main__":
         "-val_num_workers",
         "--val_num_workers",
         type=int,
-        default=1,
+        default=0,
         help="the num_workers parameter of validation dataloader.",
-    )
-    parser.add_argument(
-        "-interval",
-        "--interval",
-        type=int,
-        default=5,
-        help="the validation interval under epoch level.",
     )
     parser.add_argument(
         "-eval_overlap",
@@ -171,7 +175,7 @@ if __name__ == "__main__":
         "-sw_batch_size",
         "--sw_batch_size",
         type=int,
-        default=4,
+        default=1,
         help="the sw_batch_size parameter of SlidingWindowInferer.",
     )
     parser.add_argument(
@@ -181,27 +185,6 @@ if __name__ == "__main__":
         default="gaussian",
         choices=["constant", "gaussian"],
         help="the mode parameter for SlidingWindowInferer.",
-    )
-    parser.add_argument(
-        "-num_samples",
-        "--num_samples",
-        type=int,
-        default=3,
-        help="the num_samples parameter of RandCropByPosNegLabeld.",
-    )
-    parser.add_argument(
-        "-pos_sample_num",
-        "--pos_sample_num",
-        type=int,
-        default=1,
-        help="the pos parameter of RandCropByPosNegLabeld.",
-    )
-    parser.add_argument(
-        "-neg_sample_num",
-        "--neg_sample_num",
-        type=int,
-        default=1,
-        help="the neg parameter of RandCropByPosNegLabeld.",
     )
     parser.add_argument(
         "-cache_rate",
@@ -217,27 +200,19 @@ if __name__ == "__main__":
         default=None,
         help="the filename of weights.",
     )
-    parser.add_argument(
-        "-amp",
-        "--amp",
-        type=bool,
-        default=False,
-        help="whether to use automatic mixed precision.",
-    )
-    parser.add_argument(
-        "-tta_val",
-        "--tta_val",
-        type=bool,
-        default=False,
-        help="whether to use test time augmentation.",
-    )
-    parser.add_argument(
-        "-multi_gpu",
-        "--multi_gpu",
-        type=bool,
-        default=False,
-        help="whether to use multiple GPUs for training.",
-    )
+
+    parser.add_argument('-amp', '--amp', dest='amp', action='store_true', help="whether to use automatic mixed precision.")
+    parser.add_argument('-no-amp', '--no-amp', dest='amp', action='store_false')
+    parser.set_defaults(amp=True)
+
+    parser.add_argument('-tta_val', '--tta_val', dest='tta_val', action='store_true', help="whether to use test time augmentation.")
+    parser.add_argument('-no-tta_val', '--no-tta_val', dest='tta_val', action='store_false')
+    parser.set_defaults(tta_val=True)
+
+    parser.add_argument('-multi_gpu', '--multi_gpu', dest='multi_gpu', action='store_true', help="whether to use multiple GPUs for training.")
+    parser.add_argument('-no-multi_gpu', '--no-multi_gpu', dest='multi_gpu', action='store_false')
+    parser.set_defaults(multi_gpu=False)
+
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
     args = parser.parse_args()
     setup_root_logger()

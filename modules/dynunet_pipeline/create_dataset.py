@@ -25,15 +25,22 @@ def get_data(args, batch_size=1, mode="train"):
     fold = args.fold
     task_id = args.task_id
     root_dir = args.root_dir
-    datalist_path = args.datalist_path
+    datalist_path = args.datalist_path if hasattr(args, 'datalist_path') else None
     test_files_dir = args.test_files_dir if hasattr(args, 'test_files_dir') else None
     dataset_path = os.path.join(root_dir, task_name[task_id])
 
     preproc_out_dir = args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None
 
-    use_mni_prior = True if (hasattr(args, "mni_prior_path") and args.mni_prior_path) else False
+    use_mni_prior = True if args.mni_prior_path else False
+    transform_params = (args.pos_sample_num if hasattr(args, "pos_sample_num") else None,
+                        args.neg_sample_num if hasattr(args, "neg_sample_num") else None,
+                        args.use_nonzero,
+                        args.registration_template_path if hasattr(args, "registration_template_path") else None,
+                        preproc_out_dir,
+                        #args.do_brain_extraction,
+                        #use_mni_prior
+    )
 
-    transform_params = (args.pos_sample_num, args.neg_sample_num)
     multi_gpu_flag = args.multi_gpu
 
     if mode == "test":
@@ -100,7 +107,7 @@ def get_data(args, batch_size=1, mode="train"):
         data_dict.pop("image")
         return data_dict
 
-    datalist = [expand_paths_for_modalities(d, modalities, use_mni_prior) for d in datalist]
+    datalist = [expand_paths_for_modalities(d, modalities, args.mni_prior_path) for d in datalist]
     modality_keys = sorted([k for k in datalist[0].keys() if "image_" in k], key=str.lower)
     if mode == "prep":
         if multi_gpu_flag:
