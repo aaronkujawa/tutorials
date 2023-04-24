@@ -8,11 +8,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import json
 import logging
 import os
 import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from glob import glob
 
 import ignite.distributed as idist
 import torch
@@ -20,6 +21,7 @@ import torch.distributed as dist
 from ignite.engine import Events
 from monai.config import print_config
 from monai.handlers import CheckpointSaver, LrScheduleHandler, MeanDice, StatsHandler, ValidationHandler, from_engine
+from monai.handlers.checkpoint_saver import Checkpoint
 from monai.inferers import SimpleInferer, SlidingWindowInferer
 from monai.losses import DiceCELoss
 from monai.utils import set_determinism
@@ -115,6 +117,7 @@ def train(args):
     task_id = args.task_id
     fold = args.fold
     val_output_dir = "./runs_{}_fold{}_{}/".format(task_id, fold, args.expr_name)
+    resume_latest_checkpoint = args.resume_latest_checkpoint
     interval = args.interval
     learning_rate = args.learning_rate
     max_epochs = args.max_epochs
@@ -204,6 +207,12 @@ def train(args):
         amp=amp_flag,
     )
 
+    # add evaluator handlers
+    checkpoint_dict = {"net": net, "optimizer": optimizer, "scheduler": scheduler, "trainer": trainer}
+    if idist.get_rank() == 0:
+        checkpointSaver = CheckpointSaver(save_dir=val_output_dir, save_dict=checkpoint_dict, save_key_metric=True)
+        checkpointSaver.attach(evaluator)
+
     # add train handlers
     ValidationHandler(validator=evaluator, interval=interval, epoch_level=True).attach(trainer)
     if lr_decay_flag:
@@ -215,6 +224,7 @@ def train(args):
         if idist.get_rank() == 0:
             if engine.state.epoch == 1:
                 StatsHandler(
+                    name="StatsHandler",
                     iteration_log=True,
                     epoch_log=False,
                     tag_name="train_loss",
@@ -226,6 +236,39 @@ def train(args):
         evaluator.logger.setLevel(logging.WARNING)
         trainer.logger.setLevel(logging.WARNING)
 
+    # store the training arguments in a json file for use during inference
+    os.makedirs(val_output_dir, exist_ok=True)
+    with open(os.path.join(val_output_dir, "training_params.json"), "w") as f:
+        json.dump(vars(args), f, indent=2)
+
+    if checkpoint:
+        checkpoint_path = os.path.join(val_output_dir, checkpoint)
+        if os.path.exists(checkpoint_path):
+            Checkpoint.load_objects(to_load=checkpoint_dict,
+                                    checkpoint=checkpoint_path)
+            print("Resuming from provided checkpoint: ", checkpoint_path)
+        else:
+            raise Exception(f"Provided checkpoint {checkpoint_path} not found.")
+    elif resume_latest_checkpoint:
+        checkpoints = glob(os.path.join(val_output_dir, "checkpoint_key_metric=*.pt"))
+        if len(checkpoints) == 0:
+            print(f"No checkpoints found in {val_output_dir}. Start training from beginning...")
+        else:
+            checkpoints.sort(key=lambda x: os.path.getmtime(x))  # sort by modification time
+            checkpoint_latest = checkpoints[-1]  # pick the latest checkpoint
+            print("Resuming from latest checkpoint: ", checkpoint_latest)
+            Checkpoint.load_objects(to_load=checkpoint_dict,
+                                    checkpoint=checkpoint_latest)
+
+            # if max_epochs is provided as argument, it should overwrite the value stored in the trainer
+            trainer.state.max_epochs = max_epochs
+            # same for learning rate (note, this is the initial learning rate, not the learning rate at the resumed
+            # epoch number)
+            trainer.optimizer.param_groups[0]['initial_lr'] = learning_rate
+            scheduler.base_lrs = [learning_rate for i in scheduler.base_lrs]
+
+    else:
+        print("No checkpoints provided. Start training from beginning...")
     trainer.run()
     if multi_gpu_flag:
         dist.destroy_process_group()
@@ -342,6 +385,10 @@ if __name__ == "__main__":
         default=None,
         help="the filename of weights.",
     )
+
+    parser.add_argument('-resume_latest_checkpoint', '--resume_latest_checkpoint', dest='resume_latest_checkpoint', action='store_true',
+                        help="whether to resume training from the latest modified checkpoint.")
+    parser.set_defaults(resume_latest_checkpoint=False)
     parser.add_argument(
         "-amp",
         "--amp",
