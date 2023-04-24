@@ -72,6 +72,7 @@ class DynUNetTrainer(SupervisedTrainer):
             with torch.cuda.amp.autocast():
                 _compute_pred_loss()
             self.scaler.scale(engine.state.output[Keys.LOSS]).backward()
+            engine.fire_event(IterationEvents.BACKWARD_COMPLETED)
             self.scaler.unscale_(self.optimizer)
             if isinstance(self.network, DistributedDataParallel):
                 torch.nn.utils.clip_grad_norm_(self.network.module.parameters(), 12)
@@ -88,6 +89,5 @@ class DynUNetTrainer(SupervisedTrainer):
             else:
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
             self.optimizer.step()
-            engine.fire_event(IterationEvents.MODEL_COMPLETED)
 
         return engine.state.output
