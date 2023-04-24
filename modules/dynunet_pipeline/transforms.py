@@ -43,7 +43,7 @@ def get_task_transforms(mode, task_id, pos_sample_num, neg_sample_num, num_sampl
         keys = ["image"]
 
     load_transforms = [
-        LoadImaged(keys=keys),
+        LoadImaged(keys=keys, image_only=True),
         EnsureChannelFirstd(keys=keys),
     ]
     # 2. sampling
@@ -106,7 +106,7 @@ def get_task_transforms(mode, task_id, pos_sample_num, neg_sample_num, num_sampl
             EnsureTyped(keys=["image"]),
         ]
 
-    all_transforms = load_transforms + sample_transforms + other_transforms
+    all_transforms = load_transforms + other_transforms
     return Compose(all_transforms)
 
 
