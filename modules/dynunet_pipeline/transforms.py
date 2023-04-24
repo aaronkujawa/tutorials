@@ -16,334 +16,189 @@ from monai.transforms import (
     CropForegroundd,
     EnsureChannelFirstd,
     LoadImaged,
-    NormalizeIntensity,
-    RandCropByPosNegLabeld,
+    NormalizeIntensityd,
     RandFlipd,
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
-    RandZoomd,
-    SpatialCrop,
-    SpatialPadd,
-    ToTensord,
-    EnsureTyped,
-    AppendDownsampledd,
+    EnsureTyped, CenterSpatialCropd, ConcatItemsd, DeleteItemsd,
 )
-from monai.transforms.compose import MapTransform
-from monai.transforms.utils import generate_spatial_bounding_box
-from skimage.transform import resize
 
-from task_params import clip_values, normalize_values, patch_size, spacing
+from task_params import patch_size, deep_supr_num
+from create_network import get_kernels_strides
 
-
-def get_task_transforms(mode, task_id, pos_sample_num, neg_sample_num, num_samples):
-    if mode != "test":
-        keys = ["image", "label"]
-    else:
-        keys = ["image"]
-
-    load_transforms = [
-        LoadImaged(keys=keys, image_only=True),
-        EnsureChannelFirstd(keys=keys),
-    ]
-    # 2. sampling
-    sample_transforms = [
-        PreprocessAnisotropic(
-            keys=keys,
-            clip_values=clip_values[task_id],
-            pixdim=spacing[task_id],
-            normalize_values=normalize_values[task_id],
-            model_mode=mode,
-        ),
-        ToTensord(keys="image"),
-    ]
-    # 3. spatial transforms
-    if mode == "train":
-        other_transforms = [
-            SpatialPadd(keys=["image", "label"], spatial_size=patch_size[task_id]),
-            RandCropByPosNegLabeld(
-                keys=["image", "label"],
-                label_key="label",
-                spatial_size=patch_size[task_id],
-                pos=pos_sample_num,
-                neg=neg_sample_num,
-                num_samples=num_samples,
-                image_key="image",
-                image_threshold=0,
-            ),
-            RandZoomd(
-                keys=["image", "label"],
-                min_zoom=0.9,
-                max_zoom=1.2,
-                mode=("trilinear", "nearest"),
-                align_corners=(True, None),
-                prob=0.15,
-            ),
-            RandGaussianNoised(keys=["image"], std=0.01, prob=0.15),
-            RandGaussianSmoothd(
-                keys=["image"],
-                sigma_x=(0.5, 1.15),
-                sigma_y=(0.5, 1.15),
-                sigma_z=(0.5, 1.15),
-                prob=0.15,
-            ),
-            RandScaleIntensityd(keys=["image"], factors=0.3, prob=0.15),
-            RandFlipd(["image", "label"], spatial_axis=[0], prob=0.5),
-            RandFlipd(["image", "label"], spatial_axis=[1], prob=0.5),
-            RandFlipd(["image", "label"], spatial_axis=[2], prob=0.5),
-            AppendDownsampledd(["label"], downsampled_shapes=[patch_size[task_id]]),
-            CastToTyped(keys=["image"], dtype=np.float32),
-            EnsureTyped(keys=["image"]),
-        ]
-    elif mode == "validation":
-        other_transforms = [
-            CastToTyped(keys=["image", "label"], dtype=(np.float32, np.uint8)),
-            EnsureTyped(keys=["image", "label"]),
-        ]
-    else:
-        other_transforms = [
-            CastToTyped(keys=["image"], dtype=(np.float32)),
-            EnsureTyped(keys=["image"]),
-        ]
-
-    all_transforms = load_transforms + other_transforms
-    return Compose(all_transforms)
+from monai.transforms import SampleForegroundLocationsd, RandScaleIntensityFixedMeand, RandAdjustContrastd, \
+    RandSimulateLowResolutiond, AppendDownsampledd, RandAffined
 
 
-def resample_image(image, shape, anisotrophy_flag):
-    resized_channels = []
-    if anisotrophy_flag:
-        for image_c in image:
-            resized_slices = []
-            for i in range(image_c.shape[-1]):
-                image_c_2d_slice = image_c[:, :, i]
-                image_c_2d_slice = resize(
-                    image_c_2d_slice,
-                    shape[:-1],
-                    order=3,
-                    mode="edge",
-                    cval=0,
-                    clip=True,
-                    anti_aliasing=False,
-                )
-                resized_slices.append(image_c_2d_slice)
-            resized = np.stack(resized_slices, axis=-1)
-            resized = resize(
-                resized,
-                shape,
-                order=0,
-                mode="constant",
-                cval=0,
-                clip=True,
-                anti_aliasing=False,
-            )
-            resized_channels.append(resized)
-    else:
-        for image_c in image:
-            resized = resize(
-                image_c,
-                shape,
-                order=3,
-                mode="edge",
-                cval=0,
-                clip=True,
-                anti_aliasing=False,
-            )
-            resized_channels.append(resized)
-    resized = np.stack(resized_channels, axis=0)
-    return resized
+def get_task_transforms(mode, task_id,
+                        modality_keys,
+                        pos_sample_num,
+                        neg_sample_num,
+                        sample_num,
+                        use_nonzero=False,
+                        ):
 
+    label_keys = ["label"]
+    all_keys = modality_keys + label_keys
 
-def resample_label(label, shape, anisotrophy_flag):
-    reshaped = np.zeros(shape, dtype=np.uint8)
-    n_class = np.max(label)
-    if anisotrophy_flag:
-        shape_2d = shape[:-1]
-        depth = label.shape[-1]
-        reshaped_2d = np.zeros((*shape_2d, depth), dtype=np.uint8)
+    # input modalities to which intensity based transforms should be applied
+    mod_inty_keys = modality_keys
 
-        for class_ in range(1, int(n_class) + 1):
-            for depth_ in range(depth):
-                mask = label[0, :, :, depth_] == class_
-                resized_2d = resize(
-                    mask.astype(float),
-                    shape_2d,
-                    order=1,
-                    mode="edge",
-                    cval=0,
-                    clip=True,
-                    anti_aliasing=False,
-                )
-                reshaped_2d[:, :, depth_][resized_2d >= 0.5] = class_
-        for class_ in range(1, int(n_class) + 1):
-            mask = reshaped_2d == class_
-            resized = resize(
-                mask.astype(float),
-                shape,
-                order=0,
-                mode="constant",
-                cval=0,
-                clip=True,
-                anti_aliasing=False,
-            )
-            reshaped[resized >= 0.5] = class_
-    else:
-        for class_ in range(1, int(n_class) + 1):
-            mask = label[0] == class_
-            resized = resize(
-                mask.astype(float),
-                shape,
-                order=1,
-                mode="edge",
-                cval=0,
-                clip=True,
-                anti_aliasing=False,
-            )
-            reshaped[resized >= 0.5] = class_
+    load_image = LoadImaged(keys=all_keys, image_only=True)
+    ensure_channel_first = EnsureChannelFirstd(keys=all_keys)
+    crop_transform = CropForegroundd(keys=all_keys, source_key=mod_inty_keys[0], start_coord_key=None, end_coord_key=None)
 
-    reshaped = np.expand_dims(reshaped, 0)
-    return reshaped
+    prep_load_tfm = Compose([load_image, ensure_channel_first, crop_transform], unpack_items=True)
 
+    if mode == "prep":
+        return prep_load_tfm
 
-def recovery_prediction(prediction, shape, anisotrophy_flag):
-    reshaped = np.zeros(shape, dtype=np.uint8)
-    n_class = shape[0]
-    if anisotrophy_flag:
-        c, h, w = prediction.shape[:-1]
-        d = shape[-1]
-        reshaped_d = np.zeros((c, h, w, d), dtype=np.uint8)
-        for class_ in range(1, n_class):
-            mask = prediction[class_] == 1
-            resized_d = resize(
-                mask.astype(float),
-                (h, w, d),
-                order=0,
-                mode="constant",
-                cval=0,
-                clip=True,
-                anti_aliasing=False,
-            )
-            reshaped_d[class_][resized_d >= 0.5] = 1
+    elif mode in ["train", "validation"]:
+        """ -1. add normalization to list of transforms based on the median of all crop size factors """
+        norm_transform = NormalizeIntensityd(keys=mod_inty_keys, nonzero=use_nonzero)
 
-        for class_ in range(1, n_class):
-            for depth_ in range(d):
-                mask = reshaped_d[class_, :, :, depth_] == 1
-                resized_hw = resize(
-                    mask.astype(float),
-                    shape[1:-1],
-                    order=1,
-                    mode="edge",
-                    cval=0,
-                    clip=True,
-                    anti_aliasing=False,
-                )
-                reshaped[class_, :, :, depth_][resized_hw >= 0.5] = 1
-    else:
-        for class_ in range(1, n_class):
-            mask = prediction[class_] == 1
-            resized = resize(
-                mask.astype(float),
-                shape[1:],
-                order=1,
-                mode="edge",
-                cval=0,
-                clip=True,
-                anti_aliasing=False,
-            )
-            reshaped[class_][resized >= 0.5] = 1
+        """ nnU-Net first calculates a larger patch-size, then samples the image across the image border (self.need_to_pad), so that the final
+        smaller patch size (which is cropped from the center of the larger patch) will still cover the image borders.
+        Here, instead, we directly achieve this by specifying the translate_range="cover" of the random affine. Internally,
+        the translate_range is chosen such that after augmentation patches can have their center point as close as half the
+        patch size from the image border"""
 
-    return reshaped
+        """0. Oversample the foreground. This samples the foreground at a desired number of locations. Although the sampling is
+        random, the transform doesn't inherit from RandomizableTransform, so that the result will automatically be cached for
+        training. The sampled locations will be saved in the metadata and can be used by subsequent transforms."""
 
+        # transform that creates a list of foreground locations (doesn't change the image/label data)
+        sample_foreground_locations = SampleForegroundLocationsd(label_keys=label_keys, num_samples=10000)
 
-class PreprocessAnisotropic(MapTransform):
-    """
-    This transform class takes NNUNet's preprocessing method for reference.
-    That code is in:
-    https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunet/preprocessing/preprocessing.py
+        """## 1. Random affine transformation
 
-    """
+        The following affine transformation is defined to output a (300, 300, 50) image patch.
+        The patch location is randomly chosen in a range of (-40, 40), (-40, 40), (-2, 2) in x, y, and z axes respectively.
+        The translation is relative to the image centre.
+        The 3D rotation angle is randomly chosen from (-45, 45) degrees around the z axis, and 5 degrees around x and y axes.
+        The random scaling factor is randomly chosen from (1.0 - 0.15, 1.0 + 0.15) along each axis.
+        """
 
-    def __init__(
-        self,
-        keys,
-        clip_values,
-        pixdim,
-        normalize_values,
-        model_mode,
-    ) -> None:
-        super().__init__(keys)
-        self.keys = keys
-        self.low = clip_values[0]
-        self.high = clip_values[1]
-        self.target_spacing = pixdim
-        self.mean = normalize_values[0]
-        self.std = normalize_values[1]
-        self.training = False
-        self.crop_foreg = CropForegroundd(keys=["image", "label"], source_key="image")
-        self.normalize_intensity = NormalizeIntensity(nonzero=True, channel_wise=True)
-        if model_mode in ["train"]:
-            self.training = True
+        ### Hyperparameters from experiment planning
+        rotate_range = (30 / 360 * 2 * np.pi, 30 / 360 * 2 * np.pi, 30 / 360 * 2 * np.pi)
+        scale_range = ((-0.3, 0.4), (-0.3, 0.4), (-0.3, 0.4))  # 1 is added to these values, so the scale factor will be (0.7, 1.4)
 
-    def calculate_new_shape(self, spacing, shape):
-        spacing_ratio = np.array(spacing) / np.array(self.target_spacing)
-        new_shape = (spacing_ratio * np.array(shape)).astype(int).tolist()
-        return new_shape
+        rand_affine = RandAffined(
+            keys=all_keys,
+            mode=(3,)*len(modality_keys) + ("nearest", ),  # 3 means third order spline interpolation
+            prob=1.0,
+            spatial_size=patch_size[task_id],
+            rotate_range=rotate_range,
+            prob_rotate=0.2,
+            translate_range=(0, 0, 0),
+            foreground_oversampling_prob=pos_sample_num / neg_sample_num,  # None for random sampling according to translate_range, 1.0 for foreground sampling plus random translation according to translate_range, 0.0 for random within "valid" range
+            label_key_for_foreground_oversampling="label",  # Determine which dictionary entry's metadata contains the sampled foreground locations
+            prob_translate=1.0,
+            scale_range=scale_range,
+            prob_scale=0.2,
+            padding_mode=("constant",)*len(modality_keys) + ("border", ),
+        )
 
-    def check_anisotrophy(self, spacing):
-        def check(spacing):
-            return np.max(spacing) / np.min(spacing) >= 3
+        """2. Gaussian Noise augmentation"""
+        rand_gauss_noise = RandGaussianNoised(keys=mod_inty_keys, std=0.1, prob=0.1)
 
-        return check(spacing) or check(self.target_spacing)
+        """3. Gaussian Smoothing augmentation (might need adjustment, because image channels are smoothed independently in nnU-Net"""
+        rand_gauss_smooth = RandGaussianSmoothd(keys=mod_inty_keys,
+                                                sigma_x=(0.5, 1.0),
+                                                sigma_y=(0.5, 1.0),
+                                                sigma_z=(0.5, 1.0),
+                                                prob=0.2 * 0.5, )  # 0.5 comes from the per_channel_probability
 
-    def __call__(self, data):
-        # load data
-        d = dict(data)
-        image = d["image"]
+        """4. Intensity scaling transform"""
+        scale_intensity = RandScaleIntensityd(keys=mod_inty_keys, factors=[-0.25, 0.25], prob=0.15)
 
-        image_spacings = d["image_meta_dict"]["pixdim"][1:4].tolist()
+        """5. ContrastAugmentationTransform"""
+        shift_intensity = RandScaleIntensityFixedMeand(keys=mod_inty_keys, factors=[-0.25, 0.25], preserve_range=True,
+                                                       prob=0.15)
 
-        if "label" in self.keys:
-            label = d["label"]
-            label[label < 0] = 0
+        """6. Simulate Lowres transform"""
+        sim_lowres = RandSimulateLowResolutiond(keys=mod_inty_keys, prob=0.25*0.5, zoom_range=(0.5, 1.0))
 
-        if self.training:
-            # only task 04 does not be impacted
-            cropped_data = self.crop_foreg({"image": image, "label": label})
-            image, label = cropped_data["image"], cropped_data["label"]
-        else:
-            d["original_shape"] = np.array(image.shape[1:])
-            box_start, box_end = generate_spatial_bounding_box(image)
-            image = SpatialCrop(roi_start=box_start, roi_end=box_end)(image)
-            d["bbox"] = np.vstack([box_start, box_end])
-            d["crop_shape"] = np.array(image.shape[1:])
+        """7. Adjust contrast transform with image inversion"""
+        adjust_contrast_inverted = RandAdjustContrastd(keys=mod_inty_keys, prob=0.1 * 1.0, gamma=(0.7, 1.5),
+                                                       invert_image=True, retain_stats=True)
 
-        original_shape = image.shape[1:]
-        # calculate shape
-        resample_flag = False
-        anisotrophy_flag = False
+        """8. Adjust contrast transform """
+        adjust_contrast = RandAdjustContrastd(keys=mod_inty_keys, prob=0.3 * 1.0, gamma=(0.7, 1.5), invert_image=False,
+                                              retain_stats=True)
 
-        image = image.numpy()
-        if self.target_spacing != image_spacings:
-            # resample
-            resample_flag = True
-            resample_shape = self.calculate_new_shape(image_spacings, original_shape)
-            anisotrophy_flag = self.check_anisotrophy(image_spacings)
-            image = resample_image(image, resample_shape, anisotrophy_flag)
-            if self.training:
-                label = resample_label(label, resample_shape, anisotrophy_flag)
+        """9. Mirror Transform"""
+        mirror_x = RandFlipd(all_keys, spatial_axis=[0], prob=0.5)
+        mirror_y = RandFlipd(all_keys, spatial_axis=[1], prob=0.5)
+        mirror_z = RandFlipd(all_keys, spatial_axis=[2], prob=0.5)
 
-        d["resample_flag"] = resample_flag
-        d["anisotrophy_flag"] = anisotrophy_flag
-        # clip image for CT dataset
-        if self.low != 0 or self.high != 0:
-            image = np.clip(image, self.low, self.high)
-            image = (image - self.mean) / self.std
-        else:
-            image = self.normalize_intensity(image.copy())
+        """10. Downsampled labels"""
+        _, strides = get_kernels_strides(task_id)
 
-        d["image"] = image
+        supr_label_shapes = [patch_size[task_id]]
+        for i in range(deep_supr_num[task_id]):
+            last_shape = supr_label_shapes[-1]
+            curr_strides = strides[
+                i + 1]  # ignore first set of strides, since they apply to downsampling prior to the first level
+            downsampled_shape = [int(np.round(last / curr)) for last, curr in zip(last_shape, curr_strides)]
+            supr_label_shapes.append(downsampled_shape)
 
-        if "label" in self.keys:
-            d["label"] = label
+        if mode == "train":
+            new_transform = Compose([
+                norm_transform,  # -1
+                sample_foreground_locations,  # 0
+                rand_affine,  # 1
+                rand_gauss_noise,  # 2
+                rand_gauss_smooth,  # 3
+                scale_intensity,  # 4
+                shift_intensity,  # 5
+                sim_lowres,  # 6
+                adjust_contrast_inverted,  # 7
+                adjust_contrast,  # 8
+                mirror_x, mirror_y, mirror_z,  # 9
+                AppendDownsampledd(label_keys, downsampled_shapes=supr_label_shapes),
+                CastToTyped(keys=modality_keys, dtype=np.float32),
+                EnsureTyped(keys=modality_keys),
+                ConcatItemsd(keys=modality_keys, name="image", dim=0),
+                DeleteItemsd(keys=modality_keys),
+            ], unpack_items=True)
 
-        return d
+            return new_transform
+
+        elif mode == "validation":
+            transform = Compose([
+                load_image,
+                ensure_channel_first,
+                crop_transform,
+                norm_transform,  # -1
+                CenterSpatialCropd(keys=all_keys, roi_size=patch_size[task_id]),  # to make sliding-window-inference much faster for validation (but restrict it to a central patch
+                CastToTyped(keys=all_keys, dtype=(np.float32,)*len(modality_keys)+(np.uint8,)),
+                EnsureTyped(keys=all_keys),
+                ConcatItemsd(keys=modality_keys, name="image", dim=0),
+                DeleteItemsd(keys=modality_keys),
+            ], unpack_items=True)
+
+            return transform
+
+    elif mode == "test":
+        print(f"{preproc_out_dir=}")
+        print(f"{registration_template_path=}")
+        load_image = LoadImaged(keys=modality_keys, image_only=True)
+        ensure_channel_first = EnsureChannelFirstd(keys=modality_keys)
+        crop_transform = CropForegroundd(keys=modality_keys, source_key=mod_inty_keys[0], start_coord_key=None, end_coord_key=None)
+        norm_transform = NormalizeIntensityd(keys=mod_inty_keys, nonzero=use_nonzero)
+
+        transform = Compose([
+            load_image,
+            ensure_channel_first,
+            crop_transform,
+            norm_transform,
+            # CenterSpatialCropd(keys=modality_keys, roi_size=patch_size[task_id]), # to make sliding-window-inference much faster for validation (but restrict it to a central patch
+            CastToTyped(keys=modality_keys, dtype=(np.float32,) * len(modality_keys)),
+            EnsureTyped(keys=modality_keys),
+            ConcatItemsd(keys=modality_keys, name="image", dim=0),
+            DeleteItemsd(keys=modality_keys),
+        ], unpack_items=True)
+
+        return transform
