@@ -11,11 +11,13 @@
 
 import logging
 import os
+import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import ignite.distributed as idist
 import torch
 import torch.distributed as dist
+from ignite.engine import Events
 from monai.config import print_config
 from monai.handlers import CheckpointSaver, LrScheduleHandler, MeanDice, StatsHandler, ValidationHandler, from_engine
 from monai.inferers import SimpleInferer, SlidingWindowInferer
@@ -28,6 +30,16 @@ from create_network import get_network
 from evaluator import DynUNetEvaluator
 from task_params import data_loader_params, patch_size
 from trainer import DynUNetTrainer
+
+
+def setup_root_logger():
+    logger = logging.root
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(message)s", datefmt=None)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
 def validation(args):
@@ -103,8 +115,6 @@ def train(args):
     task_id = args.task_id
     fold = args.fold
     val_output_dir = "./runs_{}_fold{}_{}/".format(task_id, fold, args.expr_name)
-    log_filename = "nnunet_task{}_fold{}.log".format(task_id, fold)
-    log_filename = os.path.join(val_output_dir, log_filename)
     interval = args.interval
     learning_rate = args.learning_rate
     max_epochs = args.max_epochs
@@ -124,7 +134,7 @@ def train(args):
         if local_rank == 0:
             print("Using deterministic training.")
 
-    # transforms
+    # set up the data loaders
     train_batch_size = data_loader_params[task_id]["batch_size"]
     if multi_gpu_flag:
         dist.init_process_group(backend="nccl", init_method="env://")
@@ -155,15 +165,6 @@ def train(args):
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: (1 - epoch / max_epochs) ** 0.9)
     # produce evaluator
-    val_handlers = (
-        [
-            StatsHandler(output_transform=lambda x: None),
-            CheckpointSaver(save_dir=val_output_dir, save_dict={"net": net}, save_key_metric=True),
-        ]
-        if idist.get_rank() == 0
-        else None
-    )
-
     evaluator = DynUNetEvaluator(
         device=device,
         val_data_loader=val_loader,
@@ -182,24 +183,13 @@ def train(args):
                 output_transform=from_engine(["pred", "label"]),
             )
         },
-        val_handlers=val_handlers,
+        val_handlers=None,
         amp=amp_flag,
         tta_val=tta_val,
     )
 
     # produce trainer
     loss = DiceCELoss(to_onehot_y=True, softmax=True, batch=batch_dice)
-    train_handlers = [ValidationHandler(validator=evaluator, interval=interval, epoch_level=True)]
-    if lr_decay_flag:
-        train_handlers += [LrScheduleHandler(lr_scheduler=scheduler, print_lr=True)]
-    if idist.get_rank() == 0:
-        train_handlers += [
-            StatsHandler(
-                tag_name="train_loss",
-                output_transform=from_engine(["loss"], first=True),
-            )
-        ]
-
     trainer = DynUNetTrainer(
         device=device,
         max_epochs=max_epochs,
@@ -210,9 +200,27 @@ def train(args):
         inferer=SimpleInferer(),
         postprocessing=None,
         key_train_metric=None,
-        train_handlers=train_handlers,
+        train_handlers=None,
         amp=amp_flag,
     )
+
+    # add train handlers
+    ValidationHandler(validator=evaluator, interval=interval, epoch_level=True).attach(trainer)
+    if lr_decay_flag:
+        lrScheduleHandler = LrScheduleHandler(lr_scheduler=scheduler, print_lr=True)
+        lrScheduleHandler.attach(trainer)
+
+    # print losses for each iteration only during first epoch
+    def print_loss(engine):
+        if idist.get_rank() == 0:
+            if engine.state.epoch == 1:
+                StatsHandler(
+                    iteration_log=True,
+                    epoch_log=False,
+                    tag_name="train_loss",
+                    output_transform=lambda x: x['loss'].item()
+                ).iteration_completed(engine)
+    trainer.add_event_handler(Events.ITERATION_COMPLETED, print_loss)
 
     if local_rank > 0:
         evaluator.logger.setLevel(logging.WARNING)
@@ -377,6 +385,9 @@ if __name__ == "__main__":
         default=False,
         help="whether to use multiple GPUs for training.",
     )
+
+    setup_root_logger()
+
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
     args = parser.parse_args()
     if args.local_rank == 0:

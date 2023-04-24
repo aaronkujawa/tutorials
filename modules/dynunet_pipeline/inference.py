@@ -8,8 +8,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import logging
 import os
+import sys
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import torch
@@ -21,6 +22,16 @@ from create_dataset import get_data
 from create_network import get_network
 from inferrer import DynUNetInferrer
 from task_params import patch_size, task_name
+
+
+def setup_root_logger():
+    logger = logging.root
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(message)s", datefmt=None)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 
 def inference(args):
@@ -201,4 +212,5 @@ if __name__ == "__main__":
     )
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
     args = parser.parse_args()
+    setup_root_logger()
     inference(args)
