@@ -61,7 +61,8 @@ def validation(args):
 
     # produce the network
     checkpoint = args.checkpoint
-    val_output_dir = "./runs_{}_fold{}_{}/".format(task_id, args.fold, args.expr_name)
+    model_folds_dir = os.path.join(args.model_folds_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
+        args.task_id, args.fold, args.expr_name))
 
     if multi_gpu_flag:
         dist.init_process_group(backend="nccl", init_method="env://")
@@ -72,7 +73,7 @@ def validation(args):
 
     properties, val_loader = get_data(args, mode="validation")
     properties['mni_prior_path'] = mni_prior_path
-    net = get_network(properties, task_id, val_output_dir, checkpoint)
+    net = get_network(properties, task_id, model_folds_dir, checkpoint)
     net = net.to(device)
 
     if multi_gpu_flag:
@@ -121,7 +122,8 @@ def train(args):
     # load hyper parameters
     task_id = args.task_id
     fold = args.fold
-    val_output_dir = "./runs_{}_fold{}_{}/".format(task_id, fold, args.expr_name)
+    model_folds_dir = os.path.join(args.model_folds_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
+        args.task_id, args.fold, args.expr_name))
     resume_latest_checkpoint = args.resume_latest_checkpoint
     interval = args.interval
     learning_rate = args.learning_rate
@@ -165,7 +167,7 @@ def train(args):
     # produce the network
     checkpoint = args.checkpoint
     properties['mni_prior_path'] = mni_prior_path
-    net = get_network(properties, task_id, val_output_dir, checkpoint=None)  # checkpoint is loaded later if provided
+    net = get_network(properties, task_id, model_folds_dir, checkpoint=None)  # checkpoint is loaded later if provided
     net = net.to(device)
 
     if multi_gpu_flag:
@@ -223,7 +225,7 @@ def train(args):
     # add evaluator handlers
     checkpoint_dict = {"net": net, "optimizer": optimizer, "scheduler": scheduler, "trainer": trainer}
     if idist.get_rank() == 0:
-        checkpointSaver = CheckpointSaver(save_dir=val_output_dir, save_dict=checkpoint_dict, save_key_metric=True)
+        checkpointSaver = CheckpointSaver(save_dir=model_folds_dir, save_dict=checkpoint_dict, save_key_metric=True)
         checkpointSaver.attach(evaluator)
 
     # add train handlers
@@ -250,19 +252,19 @@ def train(args):
         trainer.logger.setLevel(logging.WARNING)
 
     # store the training arguments in a json file for use during inference
-    os.makedirs(val_output_dir, exist_ok=True)
-    with open(os.path.join(val_output_dir, "training_params.json"), "w") as f:
+    os.makedirs(model_folds_dir, exist_ok=True)
+    with open(os.path.join(model_folds_dir, "training_params.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
 
     # store the prior in model folder
     if mni_prior_path:
         if os.path.isfile(mni_prior_path):
-            shutil.copy(mni_prior_path, val_output_dir)
+            shutil.copy(mni_prior_path, model_folds_dir)
         else:
             raise Exception(f"--mni_prior_path provided but file not found: {properties['mni_prior_path']}")
 
     if checkpoint:
-        checkpoint_path = os.path.join(val_output_dir, checkpoint)
+        checkpoint_path = os.path.join(model_folds_dir, checkpoint)
         if os.path.exists(checkpoint_path):
             Checkpoint.load_objects(to_load=checkpoint_dict,
                                     checkpoint=checkpoint_path)
@@ -270,9 +272,9 @@ def train(args):
         else:
             raise Exception(f"Provided checkpoint {checkpoint_path} not found.")
     elif resume_latest_checkpoint:
-        checkpoints = glob(os.path.join(val_output_dir, "checkpoint_key_metric=*.pt"))
+        checkpoints = glob(os.path.join(model_folds_dir, "checkpoint_key_metric=*.pt"))
         if len(checkpoints) == 0:
-            print(f"No checkpoints found in {val_output_dir}. Start training from beginning...")
+            print(f"No checkpoints found in {model_folds_dir}. Start training from beginning...")
         else:
             checkpoints.sort(key=lambda x: os.path.getmtime(x))  # sort by modification time
             checkpoint_latest = checkpoints[-1]  # pick the latest checkpoint
@@ -390,6 +392,13 @@ if __name__ == "__main__":
         type=int,
         default=1000,
         help="number of epochs of training.",
+    )
+    parser.add_argument(
+        "-model_folds_dir",
+        "--model_folds_dir",
+        type=str,
+        default="",
+        help="Path to folder that contains subfolders task01, task02... under which to store trained models",
     )
     parser.add_argument("-mode", "--mode", type=str, default="train", choices=["train", "val"])
     parser.add_argument(
