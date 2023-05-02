@@ -16,15 +16,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 from ignite.engine import Engine
-from monai.transforms import SaveImaged, BatchInverseTransform, allow_missing_keys_mode
+from monai.transforms import SaveImaged, BatchInverseTransform, ANTsApplyTransformd, allow_missing_keys_mode
 from monai.engines import SupervisedEvaluator
 from monai.engines.utils import IterationEvents
 from monai.inferers import Inferer
 from monai.networks.utils import eval_mode
 from monai.transforms import AsDiscrete
 from torch.utils.data import DataLoader
-
-
 
 
 class DynUNetInferrer(SupervisedEvaluator):
@@ -167,7 +165,7 @@ class DynUNetInferrer(SupervisedEvaluator):
                 # transform saved segmentation into the space of the original image
                 print("transform from MNI template space to original image space")
                 # Define transform that uses ANTs to invert the affine registration to the template space
-                #ants_apply_transform = ANTsApplyTransformd(keys="image_0000") TODO: uncomment when ANTs integrated
+                ants_apply_transform = ANTsApplyTransformd(keys="image_0000")
 
                 mni_space_segm_path = os.path.join(mni_template_space_output_folder_path, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1].replace(".nii.gz", "_pred.nii.gz"))
                 output_original_space_segm_path = os.path.join(self.output_dir, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1]).replace("_ANTsregistered", "").replace("_stripped", "")
@@ -175,7 +173,6 @@ class DynUNetInferrer(SupervisedEvaluator):
                                      input_file_path=mni_space_segm_path,
                                      output_file_path=output_original_space_segm_path,
                                      use_inverse_trfm=True)
-
 
         engine.fire_event(IterationEvents.FORWARD_COMPLETED)
         return {"pred": predictions}

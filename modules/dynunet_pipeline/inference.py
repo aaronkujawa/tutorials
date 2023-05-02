@@ -8,6 +8,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import json
 import logging
 import os
@@ -151,11 +152,11 @@ if __name__ == "__main__":
         help="where to look for the *.nii.gz files to use for inference."
     )
     parser.add_argument(
-        "-train_num_workers",
-        "--train_num_workers",
-        type=int,
-        default=4,
-        help="the num_workers parameter of training dataloader.",
+        "-registration_template_path",
+        "--registration_template_path",
+        type=str,
+        default="",
+        help="Location of template for affine registration during pre-processing."
     )
     parser.add_argument(
         "-val_num_workers",
@@ -212,6 +213,10 @@ if __name__ == "__main__":
     parser.add_argument('-multi_gpu', '--multi_gpu', dest='multi_gpu', action='store_true', help="whether to use multiple GPUs for training.")
     parser.add_argument('-no-multi_gpu', '--no-multi_gpu', dest='multi_gpu', action='store_false')
     parser.set_defaults(multi_gpu=False)
+
+    parser.add_argument('-do_brain_extraction', '--do_brain_extraction', dest='do_brain_extraction', action='store_true', help="whether to perform perform brain extraction during preprocessing.")
+    parser.add_argument('-no-do_brain_extraction', '--no-do_brain_extraction', dest='do_brain_extraction', action='store_false')
+    parser.set_defaults(do_brain_extraction=False)
 
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
     args = parser.parse_args()

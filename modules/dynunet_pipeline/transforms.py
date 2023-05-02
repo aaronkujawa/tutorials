@@ -8,6 +8,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 
 import numpy as np
 from monai.transforms import (
@@ -21,7 +22,12 @@ from monai.transforms import (
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
-    EnsureTyped, CenterSpatialCropd, ConcatItemsd, DeleteItemsd,
+    EnsureTyped,
+    CenterSpatialCropd,
+    ConcatItemsd,
+    DeleteItemsd,
+    ANTsAffineRegistrationd,
+    BrainExtractiond, Identityd,
 )
 
 from task_params import patch_size, deep_supr_num
@@ -187,12 +193,20 @@ def get_task_transforms(mode, task_id,
     elif mode == "test":
         print(f"{preproc_out_dir=}")
         print(f"{registration_template_path=}")
+        affine_reg = ANTsAffineRegistrationd(keys=mod_inty_keys,  # register only the intensity image, the prior is already registered to the template
+                                             moving_img_key=modality_keys[0],
+                                             output_folder_path=os.path.join(preproc_out_dir, "registered"),
+                                             template_path=registration_template_path)
+        identity = Identityd(all_keys, allow_missing_keys=True)
+        brain_extraction = BrainExtractiond(keys=mod_inty_keys, output_folder_path=os.path.join(preproc_out_dir, "brain_extracted"))
         load_image = LoadImaged(keys=modality_keys, image_only=True)
         ensure_channel_first = EnsureChannelFirstd(keys=modality_keys)
         crop_transform = CropForegroundd(keys=modality_keys, source_key=mod_inty_keys[0], start_coord_key=None, end_coord_key=None)
         norm_transform = NormalizeIntensityd(keys=mod_inty_keys, nonzero=use_nonzero)
 
         transform = Compose([
+            affine_reg if registration_template_path else identity,
+            brain_extraction if do_brain_extraction else identity,
             load_image,
             ensure_channel_first,
             crop_transform,

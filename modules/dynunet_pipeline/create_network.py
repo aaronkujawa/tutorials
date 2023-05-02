@@ -52,6 +52,15 @@ def get_kernels_strides(task_id):
 def get_network(properties, task_id, pretrain_path, checkpoint=None):
     n_class = len(properties["labels"])
     in_channels = len(properties["modality"])
+    # increase number of input channels by one if a prior is passed as an additional image
+    if properties['mni_prior_path'] and os.path.isfile(properties['mni_prior_path']):
+        in_channels = in_channels + 1
+        print(f"Found prior: {properties['mni_prior_path']}")
+    elif properties['mni_prior_path'] and not os.path.isfile(properties['mni_prior_path']):
+        raise Exception(f"Prior file not found: {properties['mni_prior_path']}")
+    else:
+        print("No prior provided with --mni_prior_path ...")
+
     kernels, strides = get_kernels_strides(task_id)
 
     net = DynUNet(

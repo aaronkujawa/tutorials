@@ -37,8 +37,8 @@ def get_data(args, batch_size=1, mode="train"):
                         args.use_nonzero,
                         args.registration_template_path if hasattr(args, "registration_template_path") else None,
                         preproc_out_dir,
-                        #args.do_brain_extraction,
-                        #use_mni_prior
+                        args.do_brain_extraction if hasattr(args, "registration_template_path") else None,
+                        use_mni_prior
     )
 
     multi_gpu_flag = args.multi_gpu
