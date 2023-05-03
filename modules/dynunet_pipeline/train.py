@@ -29,11 +29,11 @@ from monai.losses import DiceCELoss
 from monai.utils import set_determinism
 from torch.nn.parallel import DistributedDataParallel
 
-from create_dataset import get_data
+from create_dataset import get_dataloader, get_datalist
 from create_network import get_network
 from evaluator import DynUNetEvaluator
 from transforms import determine_normalization_param_from_crop
-from task_params import data_loader_params, patch_size
+from task_params import data_loader_params, patch_size, task_name
 from trainer import DynUNetTrainer
 
 
@@ -90,11 +90,16 @@ def train(args):
     datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
     properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
 
-    prep_loader = get_data(args, mode="prep", properties=properties)
+    # get datalists
+    train_set_path = os.path.join(args.root_dir, task_name[task_id])
+    datalist_train = get_datalist("train", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
+    datalist_validation = get_datalist("validation", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
+
+    prep_loader = get_dataloader(args, datalist_train, mode="prep", properties=properties)
     args.use_nonzero = determine_normalization_param_from_crop(prep_loader, key='image_0000')
 
-    val_loader = get_data(args, mode="validation", properties=properties)
-    train_loader = get_data(args, batch_size=train_batch_size, mode="train", properties=properties)
+    val_loader = get_dataloader(args, datalist_validation, mode="validation", properties=properties)
+    train_loader = get_dataloader(args, datalist_train, batch_size=train_batch_size, mode="train", properties=properties)
 
     # produce the network
     properties['mni_prior_path'] = mni_prior_path

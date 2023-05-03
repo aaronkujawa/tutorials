@@ -16,22 +16,79 @@ import torch.distributed as dist
 from monai.data import PersistentStagedDataset, DataLoader, load_decathlon_datalist, \
     partition_dataset, PersistentDataset
 
-from task_params import task_name
 from transforms import get_task_transforms
 
 
-def get_data(args, batch_size=1, mode="train", properties=None):
+def get_datalist(mode,
+                 datalist_path,
+                 task_id,
+                 modalities,
+                 fold=0,
+                 train_set_path=None,
+                 test_files_dir=None,
+                 infer_output_dir=None,
+                 mni_prior_path=None):
+
+    # for testing, get the datalist by checking which files are available in test_files_dir directory
+    if mode == "test":
+        assert test_files_dir, f"test_files_dir must be provided, but is {test_files_dir}..."
+        datalist = [{'image': p.replace("_0000.nii.gz", ".nii.gz")}
+                    for p in sorted(glob(os.path.join(test_files_dir, "*")), key=str.lower)
+                    if "_0000.nii.gz" in p]
+        assert (len(datalist) > 0), f"No cases found in {test_files_dir} to run inference on..."
+
+        # remove cases from datalist that are already in the inference folder
+        files_in_infer_dir = os.listdir(infer_output_dir)
+        reduced_datalist = []
+        for d in datalist:
+            if not os.path.basename(d['image']) in files_in_infer_dir:
+                reduced_datalist.append(d)
+            else:
+                print(f"Found {d['image']} in {infer_output_dir}. Remove from datalist...")
+
+        assert (len(datalist) > 0), f"No cases left to run inference on..."
+        datalist = reduced_datalist
+
+    # for prep, train, and validation, get the datalist from the dataset...json file
+    else:
+        datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
+        if mode in ["prep", "train"]:
+            list_key = f"train_fold{fold}"
+        elif mode in ["validation"]:
+            list_key = f"validation_fold{fold}"
+        else:
+            raise Exception(f"mode needs to be 'prep', 'train' or 'validation' but is '{mode}'...")
+        datalist = load_decathlon_datalist(datalist_filepath, True, list_key, train_set_path)
+
+    def expand_paths_for_modalities(data_dict, modality_dict, mni_prior_path):
+        """
+        Expands the "image" entry in data_dict by "image_0000" for first modality, "image_0001" for second modality etc..
+        If prior is used, includes the prior as an additional modality...
+        """
+        for i, mod in modality_dict.items():
+            mod_val_str = "{:04d}".format(int(i))
+            data_dict["image_" + mod_val_str] = data_dict["image"].replace(".nii.gz", "_" + mod_val_str + ".nii.gz")
+
+        # add the MNI prior to the data dictionary
+        if mni_prior_path:
+            i = str(int(i) + 1)
+            mod_val_str = "{:04d}".format(int(i))
+            data_dict["image_" + mod_val_str] = mni_prior_path
+
+        data_dict.pop("image")
+        return data_dict
+
+    datalist = [expand_paths_for_modalities(d, modalities, mni_prior_path) for d in datalist]
+
+    return datalist
+
+
+def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
     # get necessary parameters:
-    fold = args.fold
     task_id = args.task_id
-    root_dir = args.root_dir
-    datalist_path = args.datalist_path if hasattr(args, 'datalist_path') else None
-    test_files_dir = args.test_files_dir if hasattr(args, 'test_files_dir') else None
-    dataset_path = os.path.join(root_dir, task_name[task_id])
-
     preproc_out_dir = args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None
-
     use_mni_prior = True if args.mni_prior_path else False
+
     transform_params = (args.pos_sample_num if hasattr(args, "pos_sample_num") else None,
                         args.neg_sample_num if hasattr(args, "neg_sample_num") else None,
                         args.use_nonzero if hasattr(args, "use_nonzero") else None,
@@ -43,54 +100,6 @@ def get_data(args, batch_size=1, mode="train", properties=None):
 
     multi_gpu_flag = args.multi_gpu
 
-    if mode == "test":
-        list_key = "test"
-    elif mode == "prep":
-        list_key = "{}_fold{}".format("train", fold)
-    else:
-        list_key = "{}_fold{}".format(mode, fold)
-
-    if mode == "test":
-        datalist = [{'image': p.replace("_0000.nii.gz", ".nii.gz")}
-                    for p in sorted(glob(os.path.join(test_files_dir, "*")), key=str.lower)
-                    if "_0000.nii.gz" in p]
-        assert (len(datalist) > 0), f"No cases found in {test_files_dir} to run inference on..."
-
-        # remove cases from datalist that are already in the inference folder
-        files_in_infer_dir = os.listdir(args.infer_output_dir)
-        reduced_datalist = []
-        for d in datalist:
-            if not os.path.basename(d['image']) in files_in_infer_dir:
-                reduced_datalist.append(d)
-            else:
-                print(f"Found {d['image']} in {args.infer_output_dir}. Remove from datalist...")
-
-        assert (len(datalist) > 0), f"No cases left to run inference on..."
-        datalist = reduced_datalist
-
-    else:
-        datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
-        datalist = load_decathlon_datalist(datalist_filepath, True, list_key, dataset_path)
-
-    # the datalist needs to be extended by _0000 for first modality, _0001 for second modality etc...
-    modalities = properties['modality']
-
-    def expand_paths_for_modalities(data_dict, modality_dict, mni_prior_path):
-
-        for i, mod in modality_dict.items():
-            mod_val_str = "{:04d}".format(int(i))
-            data_dict["image_"+mod_val_str] = data_dict["image"].replace(".nii.gz", "_"+mod_val_str+".nii.gz")
-
-        # add the MNI prior to the data dictionary
-        if mni_prior_path:
-            i = str(int(i)+1)
-            mod_val_str = "{:04d}".format(int(i))
-            data_dict["image_" + mod_val_str] = mni_prior_path
-
-        data_dict.pop("image")
-        return data_dict
-
-    datalist = [expand_paths_for_modalities(d, modalities, args.mni_prior_path) for d in datalist]
     modality_keys = sorted([k for k in datalist[0].keys() if "image_" in k], key=str.lower)
     if mode == "prep":
         if multi_gpu_flag:

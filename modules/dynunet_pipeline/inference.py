@@ -21,7 +21,7 @@ from monai.data import load_decathlon_properties
 from monai.inferers import SlidingWindowInferer
 from torch.nn.parallel import DistributedDataParallel
 
-from create_dataset import get_data
+from create_dataset import get_dataloader, get_datalist
 from create_network import get_network
 from inferrer import DynUNetInferrer
 from task_params import patch_size, task_name
@@ -78,7 +78,15 @@ def inference(args):
 
     args.use_nonzero = train_args_dict["use_nonzero"]
     args.mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if ("mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
-    test_loader = get_data(args, mode="test", properties=properties)
+
+    # get datalist
+    datalist_testing = get_datalist("test", datalist_path, task_id, properties['modality'],
+                                    test_files_dir=args.test_files_dir,
+                                    infer_output_dir=args.infer_output_dir,
+                                    mni_prior_path=args.mni_prior_path)
+
+    # get dataloader
+    test_loader = get_dataloader(args, datalist_testing, mode="test", properties=properties)
 
     properties['mni_prior_path'] = args.mni_prior_path
 
