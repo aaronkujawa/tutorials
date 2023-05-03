@@ -21,6 +21,7 @@ import torch
 import torch.distributed as dist
 from ignite.engine import Events
 from monai.config import print_config
+from monai.data import load_decathlon_properties
 from monai.handlers import CheckpointSaver, LrScheduleHandler, MeanDice, StatsHandler, ValidationHandler, from_engine
 from monai.handlers.checkpoint_saver import Checkpoint
 from monai.inferers import SimpleInferer, SlidingWindowInferer
@@ -69,6 +70,7 @@ def train(args):
     determinism_seed = args.determinism_seed
     mni_prior_path = args.mni_prior_path
     checkpoint = args.checkpoint
+    datalist_path = args.datalist_path
 
     if determinism_flag:
         set_determinism(seed=determinism_seed)
@@ -85,11 +87,14 @@ def train(args):
     else:
         device = torch.device("cuda")
 
-    properties, prep_loader = get_data(args, mode="prep")
+    datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
+    properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
+
+    prep_loader = get_data(args, mode="prep", properties=properties)
     args.use_nonzero = determine_normalization_param_from_crop(prep_loader, key='image_0000')
 
-    _, val_loader = get_data(args, mode="validation")
-    _, train_loader = get_data(args, batch_size=train_batch_size, mode="train")
+    val_loader = get_data(args, mode="validation", properties=properties)
+    train_loader = get_data(args, batch_size=train_batch_size, mode="train", properties=properties)
 
     # produce the network
     properties['mni_prior_path'] = mni_prior_path

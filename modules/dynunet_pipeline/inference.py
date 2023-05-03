@@ -17,6 +17,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 import torch
 import torch.distributed as dist
+from monai.data import load_decathlon_properties
 from monai.inferers import SlidingWindowInferer
 from torch.nn.parallel import DistributedDataParallel
 
@@ -54,6 +55,7 @@ def inference(args):
     tta_val = args.tta_val
     multi_gpu_flag = args.multi_gpu
     local_rank = args.local_rank
+    datalist_path = args.datalist_path
 
     if not os.path.exists(infer_output_dir):
         os.makedirs(infer_output_dir, exist_ok=True)
@@ -70,9 +72,13 @@ def inference(args):
     with open(os.path.join(model_folder_path, "training_params.json"), "r") as f:
         train_args_dict = json.load(f)
 
+    # load dataset properties
+    datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
+    properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
+
     args.use_nonzero = train_args_dict["use_nonzero"]
     args.mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if ("mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
-    properties, test_loader = get_data(args, mode="test")
+    test_loader = get_data(args, mode="test", properties=properties)
 
     properties['mni_prior_path'] = args.mni_prior_path
 

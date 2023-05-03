@@ -13,14 +13,14 @@ import os
 from glob import glob
 
 import torch.distributed as dist
-from monai.data import PersistentStagedDataset, DataLoader, load_decathlon_datalist, load_decathlon_properties, \
+from monai.data import PersistentStagedDataset, DataLoader, load_decathlon_datalist, \
     partition_dataset, PersistentDataset
 
 from task_params import task_name
 from transforms import get_task_transforms
 
 
-def get_data(args, batch_size=1, mode="train"):
+def get_data(args, batch_size=1, mode="train", properties=None):
     # get necessary parameters:
     fold = args.fold
     task_id = args.task_id
@@ -49,21 +49,6 @@ def get_data(args, batch_size=1, mode="train"):
         list_key = "{}_fold{}".format("train", fold)
     else:
         list_key = "{}_fold{}".format(mode, fold)
-    datalist_name = "dataset_task{}.json".format(task_id)
-
-    property_keys = [
-        "name",
-        "description",
-        "reference",
-        "licence",
-        "tensorImageSize",
-        "modality",
-        "labels",
-        "numTraining",
-        "numTest",
-    ]
-
-    properties = load_decathlon_properties(os.path.join(datalist_path, datalist_name), property_keys)
 
     if mode == "test":
         datalist = [{'image': p.replace("_0000.nii.gz", ".nii.gz")}
@@ -84,9 +69,8 @@ def get_data(args, batch_size=1, mode="train"):
         datalist = reduced_datalist
 
     else:
-        datalist = load_decathlon_datalist(
-            os.path.join(datalist_path, datalist_name), True, list_key, dataset_path
-        )
+        datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
+        datalist = load_decathlon_datalist(datalist_filepath, True, list_key, dataset_path)
 
     # the datalist needs to be extended by _0000 for first modality, _0001 for second modality etc...
     modalities = properties['modality']
@@ -190,4 +174,4 @@ def get_data(args, batch_size=1, mode="train"):
     else:
         raise ValueError(f"mode should be train, validation or test.")
 
-    return properties, data_loader
+    return data_loader
