@@ -46,78 +46,6 @@ def setup_root_logger():
     logger.addHandler(handler)
 
 
-def validation(args):
-    # load hyper parameters
-    task_id = args.task_id
-    sw_batch_size = args.sw_batch_size
-    tta_val = args.tta_val
-    window_mode = args.window_mode
-    eval_overlap = args.eval_overlap
-    multi_gpu_flag = args.multi_gpu
-    local_rank = args.local_rank
-    amp = args.amp
-    mni_prior_path = args.mni_prior_path
-
-
-    # produce the network
-    checkpoint = args.checkpoint
-    model_folds_dir = os.path.join(args.model_folds_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
-        args.task_id, args.fold, args.expr_name))
-
-    if multi_gpu_flag:
-        dist.init_process_group(backend="nccl", init_method="env://")
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(device)
-    else:
-        device = torch.device("cuda")
-
-    properties, val_loader = get_data(args, mode="validation")
-    properties['mni_prior_path'] = mni_prior_path
-    net = get_network(properties, task_id, model_folds_dir, checkpoint)
-    net = net.to(device)
-
-    if multi_gpu_flag:
-        net = DistributedDataParallel(module=net, device_ids=[device])
-
-    num_classes = len(properties["labels"])
-
-    net.eval()
-
-    evaluator = DynUNetEvaluator(
-        device=device,
-        val_data_loader=val_loader,
-        network=net,
-        num_classes=num_classes,
-        inferer=SlidingWindowInferer(
-            roi_size=patch_size[task_id],
-            sw_batch_size=sw_batch_size,
-            overlap=eval_overlap,
-            mode=window_mode,
-        ),
-        postprocessing=None,
-        key_val_metric={
-            "val_mean_dice": MeanDice(
-                include_background=False,
-                output_transform=from_engine(["pred", "label"]),
-            )
-        },
-        additional_metrics=None,
-        amp=amp,
-        tta_val=tta_val,
-    )
-
-    evaluator.run()
-    if local_rank == 0:
-        print(evaluator.state.metrics)
-        results = evaluator.state.metric_details["val_mean_dice"]
-        if num_classes > 2:
-            for i in range(num_classes - 1):
-                print("mean dice for label {} is {}".format(i + 1, results[:, i].mean()))
-
-    if multi_gpu_flag:
-        dist.destroy_process_group()
-
-
 def train(args):
     # load hyper parameters
     task_id = args.task_id
@@ -140,8 +68,7 @@ def train(args):
     determinism_flag = args.determinism_flag
     determinism_seed = args.determinism_seed
     mni_prior_path = args.mni_prior_path
-
-    args.use_nonzero = None  # this is a parameter of the intensity normalization transform. It is determined during preprocessing
+    checkpoint = args.checkpoint
 
     if determinism_flag:
         set_determinism(seed=determinism_seed)
@@ -165,7 +92,6 @@ def train(args):
     _, train_loader = get_data(args, batch_size=train_batch_size, mode="train")
 
     # produce the network
-    checkpoint = args.checkpoint
     properties['mni_prior_path'] = mni_prior_path
     net = get_network(properties, task_id, model_folds_dir, checkpoint=None)  # checkpoint is loaded later if provided
     net = net.to(device)
@@ -400,7 +326,6 @@ if __name__ == "__main__":
         default="",
         help="Path to folder that contains subfolders task01, task02... under which to store trained models",
     )
-    parser.add_argument("-mode", "--mode", type=str, default="train", choices=["train", "val"])
     parser.add_argument(
         "-checkpoint",
         "--checkpoint",
@@ -462,7 +387,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.local_rank == 0:
         print_config()
-    if args.mode == "train":
-        train(args)
-    elif args.mode == "val":
-        validation(args)
+    train(args)

@@ -34,12 +34,12 @@ def get_data(args, batch_size=1, mode="train"):
     use_mni_prior = True if args.mni_prior_path else False
     transform_params = (args.pos_sample_num if hasattr(args, "pos_sample_num") else None,
                         args.neg_sample_num if hasattr(args, "neg_sample_num") else None,
-                        args.use_nonzero,
+                        args.use_nonzero if hasattr(args, "use_nonzero") else None,
                         args.registration_template_path if hasattr(args, "registration_template_path") else None,
                         preproc_out_dir,
                         args.do_brain_extraction if hasattr(args, "registration_template_path") else None,
                         use_mni_prior
-    )
+                        )
 
     multi_gpu_flag = args.multi_gpu
 
@@ -82,7 +82,6 @@ def get_data(args, batch_size=1, mode="train"):
 
         assert (len(datalist) > 0), f"No cases left to run inference on..."
         datalist = reduced_datalist
-
 
     else:
         datalist = load_decathlon_datalist(
