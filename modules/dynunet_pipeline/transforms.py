@@ -45,7 +45,7 @@ def get_task_transforms(mode,
                         use_nonzero=False,
                         registration_template_path=None,
                         preproc_out_dir=None,
-                        do_brain_extraction=False,
+                        bet=False,
                         use_prior=False,
                         ):
 
@@ -207,7 +207,7 @@ def get_task_transforms(mode,
 
         transform = Compose([
             affine_reg if registration_template_path else identity,
-            brain_extraction if do_brain_extraction else identity,
+            brain_extraction if bet else identity,
             load_image,
             ensure_channel_first,
             crop_transform,

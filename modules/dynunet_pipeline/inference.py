@@ -102,7 +102,7 @@ def inference(args):
     transform_params = {"use_nonzero": train_args_dict["use_nonzero"],
                         "registration_template_path": args.registration_template_path if hasattr(args, "registration_template_path") else None,
                         "preproc_out_dir": args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None,
-                        "do_brain_extraction": args.do_brain_extraction if hasattr(args, "registration_template_path") else None,
+                        "bet": args.bet if hasattr(args, "registration_template_path") else None,
                         "use_prior": True if prior_path else False
                         }
 
@@ -264,9 +264,9 @@ if __name__ == "__main__":
     parser.add_argument('-no-multi_gpu', '--no-multi_gpu', dest='multi_gpu', action='store_false')
     parser.set_defaults(multi_gpu=False)
 
-    parser.add_argument('-do_brain_extraction', '--do_brain_extraction', dest='do_brain_extraction', action='store_true', help="whether to perform perform brain extraction during preprocessing.")
-    parser.add_argument('-no-do_brain_extraction', '--no-do_brain_extraction', dest='do_brain_extraction', action='store_false')
-    parser.set_defaults(do_brain_extraction=False)
+    parser.add_argument('-bet', '--bet', dest='bet', action='store_true', help="whether to perform perform brain extraction during preprocessing.")
+    parser.add_argument('-no-bet', '--no-bet', dest='bet', action='store_false')
+    parser.set_defaults(bet=False)
 
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
     args = parser.parse_args()

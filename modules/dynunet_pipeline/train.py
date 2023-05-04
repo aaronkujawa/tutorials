@@ -434,10 +434,6 @@ if __name__ == "__main__":
     parser.add_argument('-no-multi_gpu', '--no-multi_gpu', dest='multi_gpu', action='store_false')
     parser.set_defaults(multi_gpu=False)
 
-    parser.add_argument('-do_brain_extraction', '--do_brain_extraction', dest='do_brain_extraction', action='store_true', help="whether to perform perform brain extraction during preprocessing.")
-    parser.add_argument('-no-do_brain_extraction', '--no-do_brain_extraction', dest='do_brain_extraction', action='store_false')
-    parser.set_defaults(do_brain_extraction=False)
-
     parser.add_argument(
         "-prior_path",
         "--prior_path",
