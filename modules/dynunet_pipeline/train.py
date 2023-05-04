@@ -95,9 +95,13 @@ def train(args):
     datalist_train = get_datalist("train", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
     datalist_validation = get_datalist("validation", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
 
+    # prep loader will perform pre-processing transforms including cropping and cache the dataset
     prep_loader = get_dataloader(args, datalist_train, mode="prep", properties=properties)
+
+    # based on cached preprocessed dataset, additional hyperparameters such as "use_nonzero" can be calculated
     args.use_nonzero = determine_normalization_param_from_crop(prep_loader, key='image_0000')
 
+    # subsequent data_loaders can continue from cached dataset
     val_loader = get_dataloader(args, datalist_validation, mode="validation", properties=properties)
     train_loader = get_dataloader(args, datalist_train, batch_size=train_batch_size, mode="train", properties=properties)
 

@@ -101,21 +101,22 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
     multi_gpu_flag = args.multi_gpu
 
     modality_keys = sorted([k for k in datalist[0].keys() if "image_" in k], key=str.lower)
+
+    # for multi-GPU, split datalist into multiple lists
+    if multi_gpu_flag:
+        datalist = partition_dataset(
+            data=datalist,
+            shuffle=True if mode in ["prep", "train"] else False,
+            num_partitions=dist.get_world_size(),
+            even_divisible=True if mode in ["prep", "train"] else False,
+        )[dist.get_rank()]
+
     if mode == "prep":
-        if multi_gpu_flag:
-            datalist = partition_dataset(
-                data=datalist,
-                shuffle=True,
-                num_partitions=dist.get_world_size(),
-                even_divisible=True,
-            )[dist.get_rank()]
-
         prep_load_tfm = get_task_transforms(mode, task_id, modality_keys, *transform_params)
-
         prep_ds = PersistentStagedDataset(
             new_transform=prep_load_tfm,
             old_transform=None,
-            data=datalist,  # shorten the list for debugging
+            data=datalist,
             cache_dir="./cache_dir",
         )
 
@@ -128,21 +129,13 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
         )
 
     elif mode == "train":
-        if multi_gpu_flag:
-            datalist = partition_dataset(
-                data=datalist,
-                shuffle=True,
-                num_partitions=dist.get_world_size(),
-                even_divisible=True,
-            )[dist.get_rank()]
-
         prep_load_tfm = get_task_transforms("prep", task_id, modality_keys, *transform_params)
         new_tfm = get_task_transforms(mode, task_id, modality_keys, *transform_params)
 
         train_ds = PersistentStagedDataset(
             new_transform=new_tfm,
             old_transform=prep_load_tfm,
-            data=datalist,  # shorten the list for debugging
+            data=datalist,
             cache_dir="./cache_dir",
         )
         data_loader = DataLoader(
@@ -153,24 +146,14 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
         )
 
     elif mode in ["validation", "test"]:
-        if multi_gpu_flag:
-            datalist = partition_dataset(
-                data=datalist,
-                shuffle=False,
-                num_partitions=dist.get_world_size(),
-                even_divisible=False,
-            )[dist.get_rank()]
-
         tfm = get_task_transforms(mode, task_id, modality_keys, *transform_params)
 
-        if mode == "validation":
-            cache_dir = "./cache_dir"
-        elif mode == "test":  # No caching for testing
-            cache_dir = None
+        # no caching for testing set
+        cache_dir = "./cache_dir" if mode == "validation" else None
 
         val_ds = PersistentDataset(
             transform=tfm,
-            data=datalist,  # shorten the list for debugging
+            data=datalist,
             cache_dir=cache_dir,
         )
 
@@ -180,6 +163,7 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
             shuffle=False,
             num_workers=args.val_num_workers, #args.val_num_workers,  # because of the brain-extraction transform, multiprocessing cannot be used, since subprocesses cannot initialize their own CUDA processes. #RuntimeError: Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spawn' start method TODO: try the 'spawn' method: mp.set_start_method("spawn")
         )
+
     else:
         raise ValueError(f"mode should be train, validation or test.")
 
