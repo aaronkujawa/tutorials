@@ -27,7 +27,7 @@ def get_datalist(mode,
                  train_set_path=None,
                  test_files_dir=None,
                  infer_output_dir=None,
-                 mni_prior_path=None):
+                 prior_path=None):
 
     # for testing, get the datalist by checking which files are available in test_files_dir directory
     if mode == "test":
@@ -60,7 +60,7 @@ def get_datalist(mode,
             raise Exception(f"mode needs to be 'prep', 'train' or 'validation' but is '{mode}'...")
         datalist = load_decathlon_datalist(datalist_filepath, True, list_key, train_set_path)
 
-    def expand_paths_for_modalities(data_dict, modality_dict, mni_prior_path):
+    def expand_paths_for_modalities(data_dict, modality_dict, prior_path):
         """
         Expands the "image" entry in data_dict by "image_0000" for first modality, "image_0001" for second modality etc..
         If prior is used, includes the prior as an additional modality...
@@ -70,15 +70,15 @@ def get_datalist(mode,
             data_dict["image_" + mod_val_str] = data_dict["image"].replace(".nii.gz", "_" + mod_val_str + ".nii.gz")
 
         # add the MNI prior to the data dictionary
-        if mni_prior_path:
+        if prior_path:
             i = str(int(i) + 1)
             mod_val_str = "{:04d}".format(int(i))
-            data_dict["image_" + mod_val_str] = mni_prior_path
+            data_dict["image_" + mod_val_str] = prior_path
 
         data_dict.pop("image")
         return data_dict
 
-    datalist = [expand_paths_for_modalities(d, modalities, mni_prior_path) for d in datalist]
+    datalist = [expand_paths_for_modalities(d, modalities, prior_path) for d in datalist]
 
     return datalist
 

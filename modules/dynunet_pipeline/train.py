@@ -49,12 +49,13 @@ def setup_root_logger():
 
 def check_input_args(args):
 
-    if args.mni_prior_path and os.path.isfile(args.mni_prior_path):
-        print(f"Found prior: {args.mni_prior_path}")
-    elif args.mni_prior_path and not os.path.isfile(args.mni_prior_path):
-        raise Exception(f"Prior file not found: {args.mni_prior_path}")
+    # prior
+    if args.prior_path and os.path.isfile(args.prior_path):
+        print(f"Found prior: {args.prior_path}")
+    elif args.prior_path and not os.path.isfile(args.prior_path):
+        raise Exception(f"Prior file not found: {args.prior_path}")
     else:
-        print("No prior provided with --mni_prior_path ...")
+        print("No prior provided with --prior_path ...")
 
 
 def train(args):
@@ -80,7 +81,7 @@ def train(args):
     local_rank = args.local_rank
     determinism_flag = args.determinism_flag
     determinism_seed = args.determinism_seed
-    mni_prior_path = args.mni_prior_path
+    prior_path = args.prior_path
     checkpoint = args.checkpoint
     datalist_path = args.datalist_path
 
@@ -104,14 +105,14 @@ def train(args):
 
     # get datalists
     train_set_path = os.path.join(args.root_dir, task_name[task_id])
-    datalist_train = get_datalist("train", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
-    datalist_validation = get_datalist("validation", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
+    datalist_train = get_datalist("train", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, prior_path=prior_path)
+    datalist_validation = get_datalist("validation", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, prior_path=prior_path)
 
     # parameters used by transforms
     transform_params = {
         "pos_sample_num": args.pos_sample_num,
         "neg_sample_num": args.neg_sample_num,
-        "use_mni_prior": True if args.mni_prior_path else False
+        "use_prior": True if args.prior_path else False
     }
 
     # parameters used by dataloaders
@@ -153,7 +154,7 @@ def train(args):
     net = get_network(task_id,
                       n_classes=len(properties["labels"]),
                       n_in_channels=len(properties["modality"]),
-                      mni_prior_path=mni_prior_path,
+                      prior_path=prior_path,
                       )
     net = net.to(device)
 
@@ -247,11 +248,11 @@ def train(args):
         json.dump(save_dict, f, indent=2)
 
     # store the prior in model folder
-    if mni_prior_path:
-        if os.path.isfile(mni_prior_path):
-            shutil.copy(mni_prior_path, model_folds_dir)
+    if prior_path:
+        if os.path.isfile(prior_path):
+            shutil.copy(prior_path, model_folds_dir)
         else:
-            raise Exception(f"--mni_prior_path provided but file not found: {properties['mni_prior_path']}")
+            raise Exception(f"--prior_path provided but file not found: {properties['prior_path']}")
 
     # checkpoint handling
     if checkpoint:
@@ -438,8 +439,8 @@ if __name__ == "__main__":
     parser.set_defaults(do_brain_extraction=False)
 
     parser.add_argument(
-        "-mni_prior_path",
-        "--mni_prior_path",
+        "-prior_path",
+        "--prior_path",
         type=str,
         default="",
         help="prior in MNI space, passed as additional input channel to network, has to have same shape as input images",

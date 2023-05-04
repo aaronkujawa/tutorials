@@ -38,16 +38,16 @@ def setup_root_logger():
 
 
 def get_prior_path(model_folder_path, train_args_dict):
-    mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if (
-                "mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
-    if mni_prior_path and os.path.isfile(mni_prior_path):
-        print(f"Found prior: {mni_prior_path}")
-    elif mni_prior_path and not os.path.isfile(mni_prior_path):
-        raise Exception(f"Prior file not found: {mni_prior_path}")
+    prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["prior_path"])) if (
+                "prior_path" in train_args_dict and train_args_dict["prior_path"]) else None
+    if prior_path and os.path.isfile(prior_path):
+        print(f"Found prior: {prior_path}")
+    elif prior_path and not os.path.isfile(prior_path):
+        raise Exception(f"Prior file not found: {prior_path}")
     else:
-        print("No prior provided with --mni_prior_path ...")
+        print("No prior provided with --prior_path ...")
 
-    return mni_prior_path
+    return prior_path
 
 
 def inference(args):
@@ -90,20 +90,20 @@ def inference(args):
     properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
 
     # prior should have been moved to model directory --> adjust path
-    mni_prior_path = get_prior_path(model_folder_path, train_args_dict)
+    prior_path = get_prior_path(model_folder_path, train_args_dict)
 
     # get datalist
     datalist_testing = get_datalist("test", datalist_path, task_id, properties['modality'],
                                     test_files_dir=args.test_files_dir,
                                     infer_output_dir=args.infer_output_dir,
-                                    mni_prior_path=mni_prior_path)
+                                    prior_path=prior_path)
 
     # parameters used by transforms
     transform_params = {"use_nonzero": train_args_dict["use_nonzero"],
                         "registration_template_path": args.registration_template_path if hasattr(args, "registration_template_path") else None,
                         "preproc_out_dir": args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None,
                         "do_brain_extraction": args.do_brain_extraction if hasattr(args, "registration_template_path") else None,
-                        "use_mni_prior": True if mni_prior_path else False
+                        "use_prior": True if prior_path else False
                         }
 
     # parameters used by dataloaders
@@ -124,7 +124,7 @@ def inference(args):
     net = get_network(task_id,
                       n_classes=len(properties["labels"]),
                       n_in_channels=len(properties["modality"]),
-                      mni_prior_path=mni_prior_path,
+                      prior_path=prior_path,
                       pretrain_path=model_folder_path,
                       checkpoint=checkpoint)
     net = net.to(device)

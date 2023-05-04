@@ -49,10 +49,10 @@ def get_kernels_strides(task_id):
     return kernels, strides
 
 
-def get_network(task_id, n_classes, n_in_channels, mni_prior_path, pretrain_path, checkpoint=None):
+def get_network(task_id, n_classes, n_in_channels, prior_path, pretrain_path=None, checkpoint=None):
 
     # increase number of input channels by one if a prior is passed as an additional image
-    if mni_prior_path:
+    if prior_path:
         n_in_channels = n_in_channels + 1
 
     kernels, strides = get_kernels_strides(task_id)
