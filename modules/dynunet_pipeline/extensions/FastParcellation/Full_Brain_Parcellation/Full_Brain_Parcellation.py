@@ -317,7 +317,7 @@ class Full_Brain_ParcellationLogic(ScriptedLoadableModuleLogic):
     """
     if not parameterNode.GetParameter("ModelInfo"):
       module_path = os.path.dirname(__file__)
-      with open(os.path.join(module_path, "../../../../data/dynunet_trained_models", "model_info.json")) as jsonfile:
+      with open(os.path.join(module_path, "../../../data/dynunet_trained_models", "model_info.json")) as jsonfile:
         modelInfo = json.load(jsonfile)
         parameterNode.SetParameter("ModelInfo", json.dumps(modelInfo))
 
@@ -341,8 +341,8 @@ class Full_Brain_ParcellationLogic(ScriptedLoadableModuleLogic):
     module_path = os.path.dirname(__file__)
     tmp_path_in = os.path.join(module_path, "tmp_in")
     tmp_path_out = os.path.join(module_path, "tmp_out")
-    ext_inference_script_path = os.path.join(module_path, "../../../inference.py")
-    model_folds_dir = os.path.join(module_path, "../../../../data/dynunet_trained_models")
+    ext_inference_script_path = os.path.join(module_path, "../../../dynunet_pipeline/inference.py")
+    model_folds_dir = os.path.join(module_path, "../../../data/dynunet_trained_models")
     datalist_path = os.path.join(model_folds_dir, "config")
 
     # get information from modelInfo (read from model_info.json)
@@ -371,7 +371,7 @@ class Full_Brain_ParcellationLogic(ScriptedLoadableModuleLogic):
     test_images_folder = os.path.realpath(tmp_path_in)
     out_folder = os.path.realpath(tmp_path_out)
     print(f"{registration_template_path=}")
-    registration_template_path = os.path.realpath(os.path.join(module_path, "../../../../", registration_template_path))
+    registration_template_path = os.path.realpath(os.path.join(module_path, "../../../", registration_template_path))
 
     # check if all paths exist
     print(f"{registration_template_path=}")
@@ -555,7 +555,7 @@ class Full_Brain_ParcellationTest(ScriptedLoadableModuleTest):
     modelInfo = json.loads(parameterNode.GetParameter("ModelInfo"))["T1 : full parcellation with prior, w/o BET (Task2120)"]
 
     module_path = os.path.dirname(__file__)
-    priorTemplatePath = os.path.join(module_path, "../../../../", "data/test_images/Task2120_regnobetprimix/imagesTs_fold0/regnobetprimix_000003000002_0000.nii.gz")
+    priorTemplatePath = os.path.join(module_path, "../../../", "data/test_images/Task2120_regnobetprimix/imagesTs_fold0/regnobetprimix_000003000002_0000.nii.gz")
     PriorTemplate = slicer.util.loadVolume(priorTemplatePath)
     inputVolume = [SampleData.downloadSample('small_T1'), PriorTemplate]
     self.delayDisplay('Loaded test data set')

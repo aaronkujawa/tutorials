@@ -49,7 +49,7 @@ def setup_root_logger():
 
 def check_input_args(args):
 
-    # prior
+    # check the prior path argmument
     if args.prior_path and os.path.isfile(args.prior_path):
         print(f"Found prior: {args.prior_path}")
     elif args.prior_path and not os.path.isfile(args.prior_path):
@@ -439,7 +439,8 @@ if __name__ == "__main__":
         "--prior_path",
         type=str,
         default="",
-        help="prior in MNI space, passed as additional input channel to network, has to have same shape as input images",
+        help="prior passed as additional input channel to network, has to have same shape as input images and requires "
+             "alignment between all input images and the prior",
     )
 
     parser.add_argument("-local_rank", "--local_rank", type=int, default=0)
