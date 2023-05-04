@@ -95,15 +95,47 @@ def train(args):
     datalist_train = get_datalist("train", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
     datalist_validation = get_datalist("validation", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, mni_prior_path=mni_prior_path)
 
-    # prep loader will perform pre-processing transforms including cropping and cache the dataset
-    prep_loader = get_dataloader(args, datalist_train, mode="prep", properties=properties)
+    # parameters used by transforms
+    transform_params = {
+        "pos_sample_num": args.pos_sample_num,
+        "neg_sample_num": args.neg_sample_num,
+        "use_mni_prior": True if args.mni_prior_path else False
+    }
 
-    # based on cached preprocessed dataset, additional hyperparameters such as "use_nonzero" can be calculated
-    args.use_nonzero = determine_normalization_param_from_crop(prep_loader, key='image_0000')
+    # parameters used by dataloaders
+    dataloader_params = {
+        "train_num_workers": args.train_num_workers,
+        "val_num_workers": args.val_num_workers,
+    }
+
+    # prep loader will perform pre-processing transforms including cropping and cache the dataset
+    prep_loader = get_dataloader(datalist_train,
+                                 transform_params,
+                                 task_id,
+                                 multi_gpu_flag,
+                                 mode="prep",
+                                 batch_size=train_batch_size,  # TODO: does batch_size have to be 1 for prep?
+                                 **dataloader_params)
+
+    # based on cached preprocessed dataset, additional transform parameters such as "use_nonzero" can be calculated
+    transform_params["use_nonzero"] = determine_normalization_param_from_crop(prep_loader, key='image_0000')
 
     # subsequent data_loaders can continue from cached dataset
-    val_loader = get_dataloader(args, datalist_validation, mode="validation", properties=properties)
-    train_loader = get_dataloader(args, datalist_train, batch_size=train_batch_size, mode="train", properties=properties)
+    val_loader = get_dataloader(datalist_validation,
+                                transform_params,
+                                task_id,
+                                multi_gpu_flag,
+                                mode="validation",
+                                batch_size=1,
+                                **dataloader_params)
+
+    train_loader = get_dataloader(datalist_train,
+                                  transform_params,
+                                  task_id,
+                                  multi_gpu_flag,
+                                  mode="train",
+                                  batch_size=train_batch_size,
+                                  **dataloader_params)
 
     # produce the network
     properties['mni_prior_path'] = mni_prior_path
@@ -194,7 +226,9 @@ def train(args):
     # store the training arguments in a json file for use during inference
     os.makedirs(model_folds_dir, exist_ok=True)
     with open(os.path.join(model_folds_dir, "training_params.json"), "w") as f:
-        json.dump(vars(args), f, indent=2)
+        save_dict = vars(args)
+        save_dict.update(transform_params)
+        json.dump(save_dict, f, indent=2)
 
     # store the prior in model folder
     if mni_prior_path:

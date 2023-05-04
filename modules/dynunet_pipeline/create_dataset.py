@@ -83,27 +83,21 @@ def get_datalist(mode,
     return datalist
 
 
-def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
-    # get necessary parameters:
-    task_id = args.task_id
-    preproc_out_dir = args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None
-    use_mni_prior = True if args.mni_prior_path else False
-
-    transform_params = (args.pos_sample_num if hasattr(args, "pos_sample_num") else None,
-                        args.neg_sample_num if hasattr(args, "neg_sample_num") else None,
-                        args.use_nonzero if hasattr(args, "use_nonzero") else None,
-                        args.registration_template_path if hasattr(args, "registration_template_path") else None,
-                        preproc_out_dir,
-                        args.do_brain_extraction if hasattr(args, "registration_template_path") else None,
-                        use_mni_prior
-                        )
-
-    multi_gpu_flag = args.multi_gpu
+def get_dataloader(
+        datalist,
+        transform_params,
+        task_id,
+        multi_gpu=False,
+        mode="train",
+        batch_size=1,
+        train_num_workers=None,
+        val_num_workers=None,
+):
 
     modality_keys = sorted([k for k in datalist[0].keys() if "image_" in k], key=str.lower)
 
     # for multi-GPU, split datalist into multiple lists
-    if multi_gpu_flag:
+    if multi_gpu:
         datalist = partition_dataset(
             data=datalist,
             shuffle=True if mode in ["prep", "train"] else False,
@@ -112,7 +106,7 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
         )[dist.get_rank()]
 
     if mode == "prep":
-        prep_load_tfm = get_task_transforms(mode, task_id, modality_keys, *transform_params)
+        prep_load_tfm = get_task_transforms(mode, task_id, modality_keys, **transform_params)
         prep_ds = PersistentStagedDataset(
             new_transform=prep_load_tfm,
             old_transform=None,
@@ -124,13 +118,13 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
             prep_ds,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=args.train_num_workers,
+            num_workers=train_num_workers,
             collate_fn=lambda x: x,
         )
 
     elif mode == "train":
-        prep_load_tfm = get_task_transforms("prep", task_id, modality_keys, *transform_params)
-        new_tfm = get_task_transforms(mode, task_id, modality_keys, *transform_params)
+        prep_load_tfm = get_task_transforms("prep", task_id, modality_keys, **transform_params)
+        new_tfm = get_task_transforms(mode, task_id, modality_keys, **transform_params)
 
         train_ds = PersistentStagedDataset(
             new_transform=new_tfm,
@@ -142,11 +136,11 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
             train_ds,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=args.train_num_workers,
+            num_workers=train_num_workers,
         )
 
     elif mode in ["validation", "test"]:
-        tfm = get_task_transforms(mode, task_id, modality_keys, *transform_params)
+        tfm = get_task_transforms(mode, task_id, modality_keys, **transform_params)
 
         # no caching for testing set
         cache_dir = "./cache_dir" if mode == "validation" else None
@@ -161,7 +155,7 @@ def get_dataloader(args, datalist, batch_size=1, mode="train", properties=None):
             val_ds,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=args.val_num_workers, #args.val_num_workers,  # because of the brain-extraction transform, multiprocessing cannot be used, since subprocesses cannot initialize their own CUDA processes. #RuntimeError: Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spawn' start method TODO: try the 'spawn' method: mp.set_start_method("spawn")
+            num_workers=val_num_workers, #args.val_num_workers,  # because of the brain-extraction transform, multiprocessing cannot be used, since subprocesses cannot initialize their own CUDA processes. #RuntimeError: Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spawn' start method TODO: try the 'spawn' method: mp.set_start_method("spawn")
         )
 
     else:

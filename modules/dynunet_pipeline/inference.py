@@ -76,19 +76,40 @@ def inference(args):
     datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
     properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
 
-    args.use_nonzero = train_args_dict["use_nonzero"]
-    args.mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if ("mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
+    # prior should have been moved to model directory --> adjust path
+    mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if ("mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
 
     # get datalist
     datalist_testing = get_datalist("test", datalist_path, task_id, properties['modality'],
                                     test_files_dir=args.test_files_dir,
                                     infer_output_dir=args.infer_output_dir,
-                                    mni_prior_path=args.mni_prior_path)
+                                    mni_prior_path=mni_prior_path)
+
+
+    # parameters used by transforms
+    transform_params = {"use_nonzero": train_args_dict["use_nonzero"],
+                        "registration_template_path": args.registration_template_path if hasattr(args, "registration_template_path") else None,
+                        "preproc_out_dir": args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None,
+                        "do_brain_extraction": args.do_brain_extraction if hasattr(args, "registration_template_path") else None,
+                        "use_mni_prior": True if mni_prior_path else False
+                        }
+
+    # parameters used by dataloaders
+    dataloader_params = {
+        "val_num_workers": args.val_num_workers,
+    }
 
     # get dataloader
-    test_loader = get_dataloader(args, datalist_testing, mode="test", properties=properties)
+    test_loader = get_dataloader(datalist_testing,
+                                 transform_params,
+                                 task_id,
+                                 multi_gpu_flag,
+                                 mode="test",
+                                 batch_size=1,
+                                 **dataloader_params,
+                                 )
 
-    properties['mni_prior_path'] = args.mni_prior_path
+    properties['mni_prior_path'] = mni_prior_path
 
     net = get_network(properties, task_id, model_folder_path, checkpoint)
     net = net.to(device)

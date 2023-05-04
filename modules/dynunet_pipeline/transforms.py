@@ -37,11 +37,12 @@ from monai.transforms import SampleForegroundLocationsd, RandScaleIntensityFixed
     RandSimulateLowResolutiond, AppendDownsampledd, RandAffined
 
 
-def get_task_transforms(mode, task_id,
+def get_task_transforms(mode,
+                        task_id,
                         modality_keys,
-                        pos_sample_num,
-                        neg_sample_num,
-                        use_nonzero,
+                        pos_sample_num=None,
+                        neg_sample_num=None,
+                        use_nonzero=False,
                         registration_template_path=None,
                         preproc_out_dir=None,
                         do_brain_extraction=False,
