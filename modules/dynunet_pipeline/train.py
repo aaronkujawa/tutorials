@@ -47,7 +47,19 @@ def setup_root_logger():
     logger.addHandler(handler)
 
 
+def check_input_args(args):
+
+    if args.mni_prior_path and os.path.isfile(args.mni_prior_path):
+        print(f"Found prior: {args.mni_prior_path}")
+    elif args.mni_prior_path and not os.path.isfile(args.mni_prior_path):
+        raise Exception(f"Prior file not found: {args.mni_prior_path}")
+    else:
+        print("No prior provided with --mni_prior_path ...")
+
+
 def train(args):
+    check_input_args(args)
+
     # load hyper parameters
     task_id = args.task_id
     fold = args.fold
@@ -137,9 +149,12 @@ def train(args):
                                   batch_size=train_batch_size,
                                   **dataloader_params)
 
-    # produce the network
-    properties['mni_prior_path'] = mni_prior_path
-    net = get_network(properties, task_id, model_folds_dir, checkpoint=None)  # checkpoint is loaded later if provided
+    # produce the network (checkpoint is loaded later if provided)
+    net = get_network(task_id,
+                      n_classes=len(properties["labels"]),
+                      n_in_channels=len(properties["modality"]),
+                      mni_prior_path=mni_prior_path,
+                      )
     net = net.to(device)
 
     if multi_gpu_flag:
@@ -154,6 +169,7 @@ def train(args):
     )
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: (1 - epoch / max_epochs) ** 0.9)
+
     # produce evaluator
     evaluator = DynUNetEvaluator(
         device=device,
@@ -237,11 +253,11 @@ def train(args):
         else:
             raise Exception(f"--mni_prior_path provided but file not found: {properties['mni_prior_path']}")
 
+    # checkpoint handling
     if checkpoint:
         checkpoint_path = os.path.join(model_folds_dir, checkpoint)
         if os.path.exists(checkpoint_path):
-            Checkpoint.load_objects(to_load=checkpoint_dict,
-                                    checkpoint=checkpoint_path)
+            Checkpoint.load_objects(to_load=checkpoint_dict, checkpoint=checkpoint_path)
             print("Resuming from provided checkpoint: ", checkpoint_path)
         else:
             raise Exception(f"Provided checkpoint {checkpoint_path} not found.")
@@ -253,8 +269,7 @@ def train(args):
             checkpoints.sort(key=lambda x: os.path.getmtime(x))  # sort by modification time
             checkpoint_latest = checkpoints[-1]  # pick the latest checkpoint
             print("Resuming from latest checkpoint: ", checkpoint_latest)
-            Checkpoint.load_objects(to_load=checkpoint_dict,
-                                    checkpoint=checkpoint_latest)
+            Checkpoint.load_objects(to_load=checkpoint_dict, checkpoint=checkpoint_latest)
 
             # if max_epochs is provided as argument, it should overwrite the value stored in the trainer
             trainer.state.max_epochs = max_epochs

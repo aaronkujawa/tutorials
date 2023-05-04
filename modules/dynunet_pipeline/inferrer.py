@@ -126,8 +126,9 @@ class DynUNetInferrer(SupervisedEvaluator):
             else:
                 predictions = _compute_pred()
 
-        # here we overwrite the "image_0000" with the predictions, because the inverse transformation will only work on the
-        # keys that were used in the forward transform, which was only the "image_0000" key
+        # here we overwrite the "image_0000" with the predictions, because the inverse transformation with
+        # BatchInverseTransform will only work on the keys that were used in the forward transform, which was only
+        # the "image_0000" key
         batchdata["image_0000"] = predictions
         mni_registered = True if 'image_0000_meta_dict_affine_trfm_file_path' in batchdata else False
 
@@ -168,7 +169,7 @@ class DynUNetInferrer(SupervisedEvaluator):
                 ants_apply_transform = ANTsApplyTransformd(keys="image_0000")
 
                 mni_space_segm_path = os.path.join(mni_template_space_output_folder_path, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1].replace(".nii.gz", "_pred.nii.gz"))
-                output_original_space_segm_path = os.path.join(self.output_dir, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1]).replace("_ANTsregistered", "").replace("_stripped", "")
+                output_original_space_segm_path = os.path.join(self.output_dir, data_dict["image_0000"].meta['filename_or_obj'].split(os.sep)[-1]).replace("_ANTsregistered", "").replace("_stripped", "").replace("_0000.nii.gz", ".nii.gz")
                 ants_apply_transform(data_dict,
                                      input_file_path=mni_space_segm_path,
                                      output_file_path=output_original_space_segm_path,

@@ -37,6 +37,19 @@ def setup_root_logger():
     logger.addHandler(handler)
 
 
+def get_prior_path(model_folder_path, train_args_dict):
+    mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if (
+                "mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
+    if mni_prior_path and os.path.isfile(mni_prior_path):
+        print(f"Found prior: {mni_prior_path}")
+    elif mni_prior_path and not os.path.isfile(mni_prior_path):
+        raise Exception(f"Prior file not found: {mni_prior_path}")
+    else:
+        print("No prior provided with --mni_prior_path ...")
+
+    return mni_prior_path
+
+
 def inference(args):
     # load hyper parameters
     task_id = args.task_id
@@ -77,14 +90,13 @@ def inference(args):
     properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
 
     # prior should have been moved to model directory --> adjust path
-    mni_prior_path = os.path.join(model_folder_path, os.path.basename(train_args_dict["mni_prior_path"])) if ("mni_prior_path" in train_args_dict and train_args_dict["mni_prior_path"]) else None
+    mni_prior_path = get_prior_path(model_folder_path, train_args_dict)
 
     # get datalist
     datalist_testing = get_datalist("test", datalist_path, task_id, properties['modality'],
                                     test_files_dir=args.test_files_dir,
                                     infer_output_dir=args.infer_output_dir,
                                     mni_prior_path=mni_prior_path)
-
 
     # parameters used by transforms
     transform_params = {"use_nonzero": train_args_dict["use_nonzero"],
@@ -109,9 +121,12 @@ def inference(args):
                                  **dataloader_params,
                                  )
 
-    properties['mni_prior_path'] = mni_prior_path
-
-    net = get_network(properties, task_id, model_folder_path, checkpoint)
+    net = get_network(task_id,
+                      n_classes=len(properties["labels"]),
+                      n_in_channels=len(properties["modality"]),
+                      mni_prior_path=mni_prior_path,
+                      pretrain_path=model_folder_path,
+                      checkpoint=checkpoint)
     net = net.to(device)
 
     if multi_gpu_flag:
