@@ -343,7 +343,7 @@ class Full_Brain_ParcellationLogic(ScriptedLoadableModuleLogic):
     tmp_path_out = os.path.join(module_path, "tmp_out")
     ext_inference_script_path = os.path.join(module_path, "../../../dynunet_pipeline/inference.py")
     model_folds_dir = os.path.join(module_path, "../../../data/dynunet_trained_models")
-    datalist_path = os.path.join(model_folds_dir, "config")
+    datalist_path = os.path.join(module_path, "../../../data/config")
 
     # get information from modelInfo (read from model_info.json)
     registration_template_path = modelInfo["registration_template_path"]
