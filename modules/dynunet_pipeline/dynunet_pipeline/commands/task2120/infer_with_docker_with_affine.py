@@ -7,10 +7,14 @@ try: # the following command doesn't work on windows
 except: # hence, on windows, assume a default user id
   UID = 1000
 
-model_folds_dir = os.path.realpath("../../../data/dynunet_trained_models")
-test_files_dir = os.path.realpath("../../../data/test_images/Task2120_regnobetprimix/imagesTs_fold0")
-out_dir = os.path.realpath("./inference_output")
-templates_dir = os.path.realpath("../../../data/templates")
+
+script_path = os.path.dirname(os.path.abspath(__file__))
+root_path = os.path.join(script_path, "..", "..", "..")
+
+model_folds_dir = os.path.join(root_path, "data", "dynunet_trained_models")
+test_files_dir = os.path.join(root_path, "data", "test_images", "Task2120_regnobetprimix", "imagesTs_fold0")
+out_dir = os.path.join(script_path, "inference_output")
+templates_dir = os.path.join(root_path, "data", "templates")
 
 if not os.path.isdir(out_dir):
   os.makedirs(out_dir, exist_ok=True)
