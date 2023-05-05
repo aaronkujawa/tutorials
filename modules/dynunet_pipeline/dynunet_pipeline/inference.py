@@ -22,9 +22,8 @@ from monai.inferers import SlidingWindowInferer
 from torch.nn.parallel import DistributedDataParallel
 
 from create_dataset import get_dataloader, get_datalist
-from create_network import get_network
+from create_network import get_network, get_kernels_strides
 from inferrer import DynUNetInferrer
-from task_params import patch_size, task_name
 
 
 def setup_root_logger():
@@ -50,6 +49,14 @@ def get_prior_path(model_folder_path, train_args_dict):
     return prior_path
 
 
+def read_task_params(task_params_filepath, task_id):
+    with open(task_params_filepath, "r") as f:
+        task_params_all_tasks = json.load(f)
+    # pick values of the relevant task_id only
+    task_params = {k:v[task_id] for k, v in task_params_all_tasks.items()}
+    return task_params
+
+
 def inference(args):
     # load hyper parameters
     task_id = args.task_id
@@ -59,9 +66,6 @@ def inference(args):
     val_output_dir = os.path.join(args.val_output_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
         args.task_id, args.fold, args.expr_name))
     sw_batch_size = args.sw_batch_size
-    infer_output_dir = os.path.join(val_output_dir, task_name[task_id])
-    args.infer_output_dir = infer_output_dir
-    args.preproc_out_dir = os.path.join(infer_output_dir, "preprocessed")
     window_mode = args.window_mode
     eval_overlap = args.eval_overlap
     amp = args.amp
@@ -69,9 +73,6 @@ def inference(args):
     multi_gpu_flag = args.multi_gpu
     local_rank = args.local_rank
     datalist_path = args.datalist_path
-
-    if not os.path.exists(infer_output_dir):
-        os.makedirs(infer_output_dir, exist_ok=True)
 
     if multi_gpu_flag:
         dist.init_process_group(backend="nccl", init_method="env://")
@@ -86,22 +87,34 @@ def inference(args):
         train_args_dict = json.load(f)
 
     # load dataset properties
-    datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
+    datalist_filepath = os.path.join(datalist_path, f"dataset_task{task_id}.json")
+    task_params_filepath = os.path.join(datalist_path, "task_params.json")
+    task_params = read_task_params(task_params_filepath, task_id)
     properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
 
     # prior should have been moved to model directory --> adjust path
     prior_path = get_prior_path(model_folder_path, train_args_dict)
 
+    # define output directories
+    infer_output_dir = os.path.join(val_output_dir, task_params["task_name"])
+    preproc_out_dir = os.path.join(infer_output_dir, "preprocessed")
+    os.makedirs(infer_output_dir, exist_ok=True)
+
     # get datalist
     datalist_testing = get_datalist("test", datalist_path, task_id, properties['modality'],
                                     test_files_dir=args.test_files_dir,
-                                    infer_output_dir=args.infer_output_dir,
+                                    infer_output_dir=infer_output_dir,
                                     prior_path=prior_path)
 
+    # calculate kernel sizes and strides
+    kernels, strides = get_kernels_strides(task_params["patch_size"], task_params["spacing"])
+
     # parameters used by transforms
-    transform_params = {"use_nonzero": train_args_dict["use_nonzero"],
+    transform_params = {
+                        "patch_size": task_params["patch_size"],
+                        "use_nonzero": train_args_dict["use_nonzero"],
                         "registration_template_path": args.registration_template_path if hasattr(args, "registration_template_path") else None,
-                        "preproc_out_dir": args.preproc_out_dir if hasattr(args, "preproc_out_dir") else None,
+                        "preproc_out_dir": preproc_out_dir,
                         "bet": args.bet if hasattr(args, "registration_template_path") else None,
                         "use_prior": True if prior_path else False
                         }
@@ -121,12 +134,15 @@ def inference(args):
                                  **dataloader_params,
                                  )
 
-    net = get_network(task_id,
-                      n_classes=len(properties["labels"]),
-                      n_in_channels=len(properties["modality"]),
-                      prior_path=prior_path,
-                      pretrain_path=model_folder_path,
-                      checkpoint=checkpoint)
+    net = get_network(
+        n_classes=len(properties["labels"]),
+        n_in_channels=len(properties["modality"]),
+        kernels=kernels,
+        strides=strides,
+        deep_supr_num=task_params["deep_supr_num"],
+        prior_path=prior_path,
+        pretrain_path=model_folder_path,
+        checkpoint=checkpoint)
     net = net.to(device)
 
     if multi_gpu_flag:
@@ -141,7 +157,7 @@ def inference(args):
         output_dir=infer_output_dir,
         num_classes=len(properties["labels"]),
         inferer=SlidingWindowInferer(
-            roi_size=patch_size[task_id],
+            roi_size=task_params["patch_size"],
             sw_batch_size=sw_batch_size,
             overlap=eval_overlap,
             mode=window_mode,

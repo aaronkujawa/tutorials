@@ -13,10 +13,9 @@ import os
 
 import torch
 from monai.networks.nets import DynUNet
-from task_params import deep_supr_num, patch_size, spacing
 
 
-def get_kernels_strides(task_id):
+def get_kernels_strides(patch_size, spacing):
     """
     This function is only used for decathlon datasets with the provided patch sizes.
     When refering this method for other tasks, please ensure that the patch size for each spatial dimension should
@@ -25,7 +24,7 @@ def get_kernels_strides(task_id):
     the product of all strides. For patch sizes that cannot find suitable strides, an error will be raised.
 
     """
-    sizes, spacings = patch_size[task_id], spacing[task_id]
+    sizes, spacings = patch_size, spacing
     input_size = sizes
     strides, kernels = [], []
     while True:
@@ -49,13 +48,19 @@ def get_kernels_strides(task_id):
     return kernels, strides
 
 
-def get_network(task_id, n_classes, n_in_channels, prior_path, pretrain_path=None, checkpoint=None):
+def get_network(
+                n_classes,
+                n_in_channels,
+                kernels,
+                strides,
+                deep_supr_num,
+                prior_path,
+                pretrain_path=None,
+                checkpoint=None):
 
     # increase number of input channels by one if a prior is passed as an additional image
     if prior_path:
         n_in_channels = n_in_channels + 1
-
-    kernels, strides = get_kernels_strides(task_id)
 
     net = DynUNet(
         spatial_dims=3,
@@ -66,7 +71,7 @@ def get_network(task_id, n_classes, n_in_channels, prior_path, pretrain_path=Non
         upsample_kernel_size=strides[1:],
         norm_name="instance",
         deep_supervision=True,
-        deep_supr_num=deep_supr_num[task_id],
+        deep_supr_num=deep_supr_num,
         return_list=True,
     )
 

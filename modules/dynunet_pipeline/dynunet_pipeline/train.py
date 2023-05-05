@@ -30,10 +30,9 @@ from monai.utils import set_determinism
 from torch.nn.parallel import DistributedDataParallel
 
 from create_dataset import get_dataloader, get_datalist
-from create_network import get_network
+from create_network import get_network, get_kernels_strides
 from evaluator import DynUNetEvaluator
 from transforms import determine_normalization_param_from_crop
-from task_params import data_loader_params, patch_size, task_name
 from trainer import DynUNetTrainer
 
 
@@ -56,6 +55,14 @@ def check_input_args(args):
         raise Exception(f"Prior file not found: {args.prior_path}")
     else:
         print("No prior provided with --prior_path ...")
+
+
+def read_task_params(task_params_filepath, task_id):
+    with open(task_params_filepath, "r") as f:
+        task_params_all_tasks = json.load(f)
+    # pick values of the relevant task_id only
+    task_params = {k:v[task_id] for k, v in task_params_all_tasks.items()}
+    return task_params
 
 
 def train(args):
@@ -91,7 +98,6 @@ def train(args):
             print("Using deterministic training.")
 
     # set up the data loaders
-    train_batch_size = data_loader_params[task_id]["batch_size"]
     if multi_gpu_flag:
         dist.init_process_group(backend="nccl", init_method="env://")
 
@@ -100,16 +106,24 @@ def train(args):
     else:
         device = torch.device("cuda")
 
-    datalist_filepath = os.path.join(datalist_path, "dataset_task{}.json".format(task_id))
+    datalist_filepath = os.path.join(datalist_path, f"dataset_task{task_id}.json")
+    task_params_filepath = os.path.join(datalist_path, "task_params.json")
+    task_params = read_task_params(task_params_filepath, task_id)
     properties = load_decathlon_properties(datalist_filepath, property_keys=["modality", "labels", "tensorImageSize"])
 
     # get datalists
-    train_set_path = os.path.join(args.root_dir, task_name[task_id])
+    train_set_path = os.path.join(args.root_dir, task_params["task_name"])
     datalist_train = get_datalist("train", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, prior_path=prior_path)
     datalist_validation = get_datalist("validation", datalist_path, task_id, properties['modality'], train_set_path=train_set_path, fold=fold, prior_path=prior_path)
 
+    # calculate kernel sizes and strides
+    kernels, strides = get_kernels_strides(task_params["patch_size"], task_params["spacing"])
+
     # parameters used by transforms
     transform_params = {
+        "patch_size": task_params["patch_size"],
+        "strides": strides,
+        "deep_supr_num": task_params["deep_supr_num"],
         "pos_sample_num": args.pos_sample_num,
         "neg_sample_num": args.neg_sample_num,
         "use_prior": True if args.prior_path else False
@@ -127,7 +141,7 @@ def train(args):
                                  task_id,
                                  multi_gpu_flag,
                                  mode="prep",
-                                 batch_size=train_batch_size,  # TODO: does batch_size have to be 1 for prep?
+                                 batch_size=task_params["data_loader_params"]["batch_size"],  # TODO: does batch_size have to be 1 for prep?
                                  **dataloader_params)
 
     # based on cached preprocessed dataset, additional transform parameters such as "use_nonzero" can be calculated
@@ -147,13 +161,15 @@ def train(args):
                                   task_id,
                                   multi_gpu_flag,
                                   mode="train",
-                                  batch_size=train_batch_size,
+                                  batch_size=task_params["data_loader_params"]["batch_size"],
                                   **dataloader_params)
 
     # produce the network (checkpoint is loaded later if provided)
-    net = get_network(task_id,
-                      n_classes=len(properties["labels"]),
+    net = get_network(n_classes=len(properties["labels"]),
                       n_in_channels=len(properties["modality"]),
+                      kernels=kernels,
+                      strides=strides,
+                      deep_supr_num=task_params["deep_supr_num"],
                       prior_path=prior_path,
                       )
     net = net.to(device)
@@ -178,7 +194,7 @@ def train(args):
         network=net,
         num_classes=len(properties["labels"]),
         inferer=SlidingWindowInferer(
-            roi_size=patch_size[task_id],
+            roi_size=task_params["patch_size"],
             sw_batch_size=sw_batch_size,
             overlap=eval_overlap,
             mode=window_mode,

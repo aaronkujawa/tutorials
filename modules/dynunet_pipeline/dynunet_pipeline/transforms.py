@@ -30,16 +30,26 @@ from monai.transforms import (
     BrainExtractiond, Identityd,
 )
 
-from task_params import patch_size, deep_supr_num
 from create_network import get_kernels_strides
 
 from monai.transforms import SampleForegroundLocationsd, RandScaleIntensityFixedMeand, RandAdjustContrastd, \
     RandSimulateLowResolutiond, AppendDownsampledd, RandAffined
 
 
+def get_deep_supr_label_shapes(deep_supr_num, patch_size, strides):
+    supr_label_shapes = [patch_size]
+    for i in range(deep_supr_num):
+        last_shape = supr_label_shapes[-1]
+        curr_strides = strides[
+            i + 1]  # ignore first set of strides, since they apply to downsampling prior to the first level
+        downsampled_shape = [int(np.round(last / curr)) for last, curr in zip(last_shape, curr_strides)]
+        supr_label_shapes.append(downsampled_shape)
+    return supr_label_shapes
 def get_task_transforms(mode,
-                        task_id,
                         modality_keys,
+                        patch_size,
+                        strides=None,
+                        deep_supr_num=None,
                         pos_sample_num=None,
                         neg_sample_num=None,
                         use_nonzero=False,
@@ -98,7 +108,7 @@ def get_task_transforms(mode,
             keys=all_keys,
             mode=(3,)*len(modality_keys) + ("nearest", ),  # 3 means third order spline interpolation
             prob=1.0,
-            spatial_size=patch_size[task_id],
+            spatial_size=patch_size,
             rotate_range=rotate_range,
             prob_rotate=0.2,
             translate_range=(0, 0, 0),
@@ -144,15 +154,7 @@ def get_task_transforms(mode,
         mirror_z = RandFlipd(all_keys, spatial_axis=[2], prob=0.5)
 
         """10. Downsampled labels"""
-        _, strides = get_kernels_strides(task_id)
-
-        supr_label_shapes = [patch_size[task_id]]
-        for i in range(deep_supr_num[task_id]):
-            last_shape = supr_label_shapes[-1]
-            curr_strides = strides[
-                i + 1]  # ignore first set of strides, since they apply to downsampling prior to the first level
-            downsampled_shape = [int(np.round(last / curr)) for last, curr in zip(last_shape, curr_strides)]
-            supr_label_shapes.append(downsampled_shape)
+        supr_label_shapes = get_deep_supr_label_shapes(deep_supr_num, patch_size, strides)
 
         if mode == "train":
             new_transform = Compose([
@@ -182,7 +184,7 @@ def get_task_transforms(mode,
                 ensure_channel_first,
                 crop_transform,
                 norm_transform,  # -1
-                CenterSpatialCropd(keys=all_keys, roi_size=patch_size[task_id]),  # to make sliding-window-inference much faster for validation (but restrict it to a central patch
+                CenterSpatialCropd(keys=all_keys, roi_size=patch_size),  # to make sliding-window-inference much faster for validation (but restrict it to a central patch
                 CastToTyped(keys=all_keys, dtype=(np.float32,)*len(modality_keys)+(np.uint8,)),
                 EnsureTyped(keys=all_keys),
                 ConcatItemsd(keys=modality_keys, name="image", dim=0),
@@ -212,7 +214,7 @@ def get_task_transforms(mode,
             ensure_channel_first,
             crop_transform,
             norm_transform,
-            # CenterSpatialCropd(keys=modality_keys, roi_size=patch_size[task_id]), # to make sliding-window-inference much faster for validation (but restrict it to a central patch
+            # CenterSpatialCropd(keys=modality_keys, roi_size=patch_size), # to make sliding-window-inference much faster for validation (but restrict it to a central patch
             CastToTyped(keys=modality_keys, dtype=(np.float32,) * len(modality_keys)),
             EnsureTyped(keys=modality_keys),
             ConcatItemsd(keys=modality_keys, name="image", dim=0),

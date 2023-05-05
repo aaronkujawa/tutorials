@@ -106,7 +106,7 @@ def get_dataloader(
         )[dist.get_rank()]
 
     if mode == "prep":
-        prep_load_tfm = get_task_transforms(mode, task_id, modality_keys, **transform_params)
+        prep_load_tfm = get_task_transforms(mode, modality_keys, **transform_params)
         prep_ds = PersistentStagedDataset(
             new_transform=prep_load_tfm,
             old_transform=None,
@@ -123,8 +123,8 @@ def get_dataloader(
         )
 
     elif mode == "train":
-        prep_load_tfm = get_task_transforms("prep", task_id, modality_keys, **transform_params)
-        new_tfm = get_task_transforms(mode, task_id, modality_keys, **transform_params)
+        prep_load_tfm = get_task_transforms("prep", modality_keys, **transform_params)
+        new_tfm = get_task_transforms(mode, modality_keys, **transform_params)
 
         train_ds = PersistentStagedDataset(
             new_transform=new_tfm,
@@ -140,7 +140,7 @@ def get_dataloader(
         )
 
     elif mode in ["validation", "test"]:
-        tfm = get_task_transforms(mode, task_id, modality_keys, **transform_params)
+        tfm = get_task_transforms(mode, modality_keys, **transform_params)
 
         # no caching for testing set
         cache_dir = "./cache_dir" if mode == "validation" else None
