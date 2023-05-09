@@ -7,12 +7,12 @@ try: # the following command doesn't work on windows
 except: # hence, on windows, assume a default user id
   UID = 1000
 
-
 script_path = os.path.dirname(os.path.abspath(__file__))
-root_path = os.path.join(script_path, "..", "..", "..")
+root_path = os.path.join(script_path, "..", "..")
 
 model_folds_dir = os.path.join(root_path, "data", "dynunet_trained_models")
 test_files_dir = os.path.join(root_path, "data", "test_images", "Task2120_regnobetprimix", "imagesTs_fold0")
+config_dir = os.path.join(root_path, "data", "config")
 out_dir = os.path.join(script_path, "inference_output")
 templates_dir = os.path.join(root_path, "data", "templates")
 
@@ -23,12 +23,13 @@ cmd = f"""docker run
 -u {UID} 
 -v {model_folds_dir}:/workspace/model_folds_dir 
 -v {test_files_dir}:/workspace/imagesTs 
+-v {config_dir}:/workspace/config 
 -v {out_dir}:/home/fast_parc/out
 -v {templates_dir}:/workspace/templates
 --ipc=host 
 --gpus 0 
 aaronkujawa/fast_parcellation:latest
---datalist_path /workspace/model_folds_dir/config
+--datalist_path /workspace/config
 --model_folds_dir /workspace/model_folds_dir 
 --test_files_dir /workspace/imagesTs 
 --val_output_dir /home/fast_parc/out
