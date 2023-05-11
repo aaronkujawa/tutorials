@@ -284,7 +284,8 @@ if __name__ == "__main__":
     parser.add_argument('-no-bet', '--no-bet', dest='bet', action='store_false')
     parser.set_defaults(bet=False)
 
-    parser.add_argument("-local-rank", "--local-rank", type=int, default=0)
     args = parser.parse_args()
+
+    args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else 0
     setup_root_logger()
     inference(args)

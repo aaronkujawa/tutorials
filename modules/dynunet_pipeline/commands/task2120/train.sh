@@ -18,7 +18,7 @@ data_dir=$root_dir/data/train_images/
 multi_gpu=0
 
 if (($multi_gpu)); then
-  python="python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=1234"
+  python="torchrun --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=1234"
   multi_gpu_str="-multi_gpu "
 else
   python="python"

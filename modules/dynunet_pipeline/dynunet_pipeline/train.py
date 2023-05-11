@@ -459,9 +459,11 @@ if __name__ == "__main__":
              "alignment between all input images and the prior",
     )
 
-    parser.add_argument("-local-rank", "--local-rank", type=int, default=0)
     setup_root_logger()
     args = parser.parse_args()
+
+    args.local_rank = int(os.environ["LOCAL_RANK"]) if "LOCAL_RANK" in os.environ else 0
+
     if args.local_rank == 0:
         print_config()
     train(args)
