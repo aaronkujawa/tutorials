@@ -1,9 +1,8 @@
-# please replace the weight variable into your actual weight
+#!/bin/bash
 #export HOME=/workspace/home/packages2023/
 #export PATH=$HOME/.local/bin:$PATH
-
 dir=$(dirname "$0")
-root_dir="$(realpath "$dir/../..")"
+root_dir="$(realpath --relative-to=$dir "$dir/../..")"
 
 cd $dir
 
@@ -13,8 +12,17 @@ task_id=2120
 
 expr_name=out_train
 
-#python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=1234 \
-cmd="python \
+multi_gpu=0
+
+if (($multi_gpu)); then
+  python="python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=1234"
+  multi_gpu_str="-multi_gpu "
+else
+  python="python"
+  multi_gpu_str=""
+fi
+
+cmd="$python \
  $root_dir/dynunet_pipeline/inference.py \
 -datalist_path $root_dir/data/config \
 -model_folds_dir $root_dir/data/dynunet_trained_models \
@@ -23,6 +31,7 @@ cmd="python \
 -expr_name ${expr_name} \
 -task_id ${task_id} \
 -checkpoint ${weight} \
+-$multi_gpu_str\
 -val_num_workers 0 \
 -no-tta_val"
 
