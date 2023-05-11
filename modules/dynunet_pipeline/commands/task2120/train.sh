@@ -2,6 +2,7 @@
 #export HOME=/workspace/home/packages2023/
 #export PATH=$HOME/.local/bin:$PATH
 dir=$(dirname "$0")
+root_dir="$(realpath "$dir/../..")"
 
 cd $dir
 
@@ -9,15 +10,15 @@ out_folder_name=out_train
 lr=1e-2
 fold=0
 task=2120
-prior_path="../../../data/train_images/Task2120_regnobetprimix/argmax_fuzzy_prior_MIX_fold0_tr+val_GIF.nii.gz"
+prior_path="$root_dir/data/train_images/Task2120_regnobetprimix/argmax_fuzzy_prior_MIX_fold0_tr+val_GIF.nii.gz"
 
-data_dir=../../../data/train_images/
+data_dir=$root_dir/data/train_images/
 
 #python \
 #python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 --master_addr="localhost" --master_port=1234 \
 cmd="python \
-../../train.py \
--datalist_path ../../../data/dynunet_trained_models/config \
+$root_dir/dynunet_pipeline/train.py \
+-datalist_path $root_dir/data/config \
 -fold $fold \
 -model_folds_dir
 .
