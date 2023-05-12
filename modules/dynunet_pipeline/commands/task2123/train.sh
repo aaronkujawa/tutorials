@@ -7,9 +7,8 @@ cd $dir
 out_folder_name=out_train
 lr=1e-2
 fold=0
-task=2120
+task=2123
 max_epochs=1000
-prior_path="$root_dir/data/train_images/Task2120_regnobetprimix/argmax_fuzzy_prior_MIX_fold0_tr+val_GIF.nii.gz"
 
 data_dir=$root_dir/data/train_images/
 
@@ -40,7 +39,6 @@ $root_dir/dynunet_pipeline/train.py \
 $multi_gpu_str\
 -amp \
 -no-tta_val \
--prior_path ${prior_path} \
 -resume_latest_checkpoint \
 "
 

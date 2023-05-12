@@ -5,9 +5,9 @@ root_dir="$(realpath --relative-to=$dir "$dir/../..")"
 
 cd $dir
 
-weight="checkpoint_key_metric=0.8319.pt"
+weight="checkpoint_key_metric=0.8626.pt"
 fold=0
-task_id=2120
+task_id=2124
 
 expr_name=out_train
 
@@ -25,7 +25,7 @@ cmd="$python \
  $root_dir/dynunet_pipeline/inference.py \
 -datalist_path $root_dir/data/config \
 -model_folds_dir $root_dir/data/dynunet_trained_models \
--test_files_dir $root_dir/data/test_images/Task2120_regnobetprimix/imagesTs_fold0 \
+-test_files_dir $root_dir/data/test_images/Task2124_regbetnoprimix/imagesTs_fold0 \
 -fold $fold \
 -expr_name ${expr_name} \
 -task_id ${task_id} \

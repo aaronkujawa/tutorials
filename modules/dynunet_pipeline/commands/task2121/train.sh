@@ -7,9 +7,9 @@ cd $dir
 out_folder_name=out_train
 lr=1e-2
 fold=0
-task=2120
+task=2121
 max_epochs=1000
-prior_path="$root_dir/data/train_images/Task2120_regnobetprimix/argmax_fuzzy_prior_MIX_fold0_tr+val_GIF.nii.gz"
+prior_path="$root_dir/data/train_images/Task2121_regbetprimix/argmax_fuzzy_prior_MIX_fold0_tr+val_GIF.nii.gz"
 
 data_dir=$root_dir/data/train_images/
 

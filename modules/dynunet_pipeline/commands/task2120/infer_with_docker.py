@@ -14,6 +14,7 @@ model_folds_dir = os.path.join(root_path, "data", "dynunet_trained_models")
 test_files_dir = os.path.join(root_path, "data", "test_images", "Task2120_regnobetprimix", "imagesTs_fold0")
 config_dir = os.path.join(root_path, "data", "config")
 out_dir = os.path.join(script_path, "inference_output")
+templates_dir = os.path.join(root_path, "data", "templates")
 
 if not os.path.isdir(out_dir):
   os.makedirs(out_dir, exist_ok=True)
@@ -24,6 +25,7 @@ cmd = f"""docker run
 -v {test_files_dir}:/workspace/imagesTs 
 -v {config_dir}:/workspace/config 
 -v {out_dir}:/home/fast_parc/out
+-v {templates_dir}:/workspace/templates
 --ipc=host 
 --gpus 0 
 aaronkujawa/fast_parcellation:latest
@@ -37,10 +39,9 @@ aaronkujawa/fast_parcellation:latest
 --checkpoint checkpoint_key_metric=0.8319.pt
 --val_num_workers 0 
 --no-tta_val
+--registration_template_path /workspace/templates/MNI_152_mri.nii.gz
 """.replace("\n", " ")
 
-#--registration_template_path /workspace/model_folds_dir/task2120/runs_2120_fold0_out_train/argmax_fuzzy_prior_MIX_fold0_tr+val_GIF.nii.gz
-#--do_brain_extraction
 
 
 print(cmd)
