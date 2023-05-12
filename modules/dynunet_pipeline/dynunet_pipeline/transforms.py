@@ -264,6 +264,8 @@ def determine_normalization_param_from_crop(prep_data_loader, key, multi_gpu):
         # convert back to list
         all_crop_size_factors = torch.stack(gathered).flatten().tolist()
 
-    print(f"{all_crop_size_factors=}")
-
-    return True if np.median(all_crop_size_factors) < 0.75 else False
+    median_crop_size_factor = np.median(all_crop_size_factors)
+    non_zero_normalization = True if median_crop_size_factor < 0.75 else False
+    print(f"Median crop size factor is {median_crop_size_factor}, "
+          f"therefore non_zero_normalization is {non_zero_normalization}")
+    return non_zero_normalization
