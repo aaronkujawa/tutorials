@@ -11,6 +11,7 @@
 import os
 
 import numpy as np
+import torch
 from monai.transforms import (
     CastToTyped,
     Compose,
@@ -30,7 +31,7 @@ from monai.transforms import (
     BrainExtractiond, Identityd,
 )
 
-from create_network import get_kernels_strides
+import torch.distributed as dist
 
 from monai.transforms import SampleForegroundLocationsd, RandScaleIntensityFixedMeand, RandAdjustContrastd, \
     RandSimulateLowResolutiond, AppendDownsampledd, RandAffined
@@ -224,14 +225,15 @@ def get_task_transforms(mode,
         return transform
 
 
-def determine_normalization_param_from_crop(prep_data_loader, key):
+def determine_normalization_param_from_crop(prep_data_loader, key, multi_gpu):
     '''
     Helper function to determine the "use_nonzero" parameter of the NormalizeIntensity transform. It loads the whole
     dataset via the provided dataloader, whose preprocessing transform includes the CropForeground transform. If the
     median volume reduction achieved by the cropping is more than 25%, use_nonzero will be returned as True, otherwise
     false.
     :param prep_data_loader: The dataloader, must be configured to go through the complete dataset once
-    :param key: The key of the dictionaries that leads to the cropped MetaTensor
+    :param key: The key of the dictionaries that points to the cropped MetaTensor
+    :param multi_gpu: Whether training data is split across multiple GPUs
     :return: bool, that indicates if zeros should be included in normalization or not.
     '''
 
@@ -248,6 +250,19 @@ def determine_normalization_param_from_crop(prep_data_loader, key):
     for batch in prep_data_loader:
         for sample in batch:
             all_crop_size_factors.append(get_crop_size_factor(sample[key]))
+
+    # In case of data on multiple GPUs, all cropping results need to be gathered
+    if multi_gpu:
+        world_size = dist.get_world_size()
+
+        # initialize tensor of expected size
+        gathered = [torch.zeros(len(all_crop_size_factors)).cuda() for _ in range(world_size)]
+
+        # Gather all padded lists into a single tensor on each process (requires conversion to torch tensor)
+        dist.all_gather(gathered, torch.tensor(all_crop_size_factors, dtype=gathered[0].dtype).cuda())
+
+        # convert back to list
+        all_crop_size_factors = torch.stack(gathered).flatten().tolist()
 
     print(f"{all_crop_size_factors=}")
 

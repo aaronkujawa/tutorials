@@ -145,7 +145,7 @@ def train(args):
                                  **dataloader_params)
 
     # based on cached preprocessed dataset, additional transform parameters such as "use_nonzero" can be calculated
-    transform_params["use_nonzero"] = determine_normalization_param_from_crop(prep_loader, key='image_0000')
+    transform_params["use_nonzero"] = determine_normalization_param_from_crop(prep_loader, key='image_0000', multi_gpu=multi_gpu_flag)
 
     # subsequent data_loaders can continue from cached dataset
     val_loader = get_dataloader(datalist_validation,
