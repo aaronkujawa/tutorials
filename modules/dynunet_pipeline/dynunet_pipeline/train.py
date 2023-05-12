@@ -71,8 +71,6 @@ def train(args):
     # load hyper parameters
     task_id = args.task_id
     fold = args.fold
-    model_folds_dir = os.path.join(args.model_folds_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
-        args.task_id, args.fold, args.expr_name))
     resume_latest_checkpoint = args.resume_latest_checkpoint
     interval = args.interval
     learning_rate = args.learning_rate
@@ -227,6 +225,10 @@ def train(args):
         amp=amp_flag,
     )
 
+    # create directory to store the model
+    model_folds_dir = os.path.join(args.model_folds_dir, "task" + task_id, "runs_{}_fold{}_{}".format(
+        args.task_id, args.fold, args.expr_name))
+    os.makedirs(model_folds_dir, exist_ok=True)
     # add evaluator handlers
     checkpoint_dict = {"net": net, "optimizer": optimizer, "scheduler": scheduler, "trainer": trainer}
     if idist.get_rank() == 0:
@@ -257,7 +259,6 @@ def train(args):
         trainer.logger.setLevel(logging.WARNING)
 
     # store the training arguments in a json file for use during inference
-    os.makedirs(model_folds_dir, exist_ok=True)
     with open(os.path.join(model_folds_dir, "training_params.json"), "w") as f:
         save_dict = vars(args)
         save_dict.update(transform_params)
